@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -26,6 +26,14 @@ export default function TripScreen() {
   const [boardingIndex, setBoardingIndex] = useState<number | null>(null);
   const [alightIndex, setAlightIndex] = useState<number | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  const scrollRef = useRef<ScrollView>(null);
+
+  // Bant sayfanın üstünde; düğmeler ise listenin altında kalabildiği için
+  // sonuç mesajı gösterilirken en üste kaydır — aksi hâlde hata gözden kaçıyor
+  function showNotice(next: Exclude<Notice, null>) {
+    setNotice(next);
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  }
 
   const onTrip = app.activeTrip !== null;
   const tripLine = onTrip ? findLine(app.activeTrip!.lineId) : undefined;
@@ -42,15 +50,15 @@ export default function TripScreen() {
   function handleBoard() {
     setNotice(null);
     if (boardingIndex === null) {
-      setNotice({ tone: "error", text: "Önce bindiğiniz durağı seçin." });
+      showNotice({ tone: "error", text: "Önce bindiğiniz durağı seçin." });
       return;
     }
     const result = app.board(selectedLineId, boardingIndex);
     if (!result.ok) {
-      setNotice({ tone: "error", text: result.error ?? "Biniş yapılamadı." });
+      showNotice({ tone: "error", text: result.error ?? "Biniş yapılamadı." });
       return;
     }
-    setNotice({
+    showNotice({
       tone: "success",
       text: `Kart basıldı — ${formatTL(fare)} düşüldü. İyi yolculuklar!`,
     });
@@ -61,16 +69,16 @@ export default function TripScreen() {
   async function handleAlight() {
     setNotice(null);
     if (alightIndex === null) {
-      setNotice({ tone: "error", text: "Önce indiğiniz durağı seçin." });
+      showNotice({ tone: "error", text: "Önce indiğiniz durağı seçin." });
       return;
     }
     const result = await app.alight(alightIndex);
     if (!result.ok) {
-      setNotice({ tone: "error", text: result.error ?? "İniş yapılamadı." });
+      showNotice({ tone: "error", text: result.error ?? "İniş yapılamadı." });
       return;
     }
     setAlightIndex(null);
-    setNotice(
+    showNotice(
       result.sent
         ? {
             tone: "success",
@@ -88,7 +96,7 @@ export default function TripScreen() {
   return (
     <View style={styles.root}>
       <Header title="Yolculuk" subtitle="Akbil basma simülasyonu" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.content}>
         {notice && <InfoBanner tone={notice.tone} text={notice.text} />}
 
         {!onTrip && (

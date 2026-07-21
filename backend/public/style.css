@@ -80,6 +80,10 @@ body {
   .live-dot { animation: none; }
 }
 
+/* SSE bağlantısı koptuğunda rozet soluk görünür (app.js setLive) */
+.live-badge.offline { color: #b9c3de; border-color: rgba(185, 195, 222, 0.4); }
+.live-badge.offline .live-dot { background: #8a94ad; animation: none; }
+
 .clock { font-variant-numeric: tabular-nums; font-size: 1.05rem; font-weight: 600; }
 
 /* İmza öğesi: durak noktalı hat şeridi */

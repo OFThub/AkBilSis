@@ -18,8 +18,10 @@ npm start
 - Panel: <http://localhost:4000>
 - Açılışta konsolda **"Ağ (mobil): http://192.168.x.x:4000"** satırı görünür —
   telefonla test ederken bu adres mobil uygulamanın **Ayarlar** ekranına girilir.
-- Panel 3 saniyede bir kendini yeniler; grafikler: saatlik yoğunluk, hat
-  kullanımı, en çok kullanılan duraklar, tam/öğrenci dağılımı + son yolculuklar.
+- Panel yeni kayıtları **anında** gösterir (SSE canlı akış, `GET /api/events`);
+  bağlantı koparsa sağ üstteki rozet "Bağlanıyor…" olur ve 15 saniyede bir
+  yedek yenileme devreye girer. Grafikler: saatlik yoğunluk, hat kullanımı,
+  en çok kullanılan duraklar, tam/öğrenci dağılımı + son yolculuklar.
 
 Demo verisi doldurmak için (backend çalışırken, ikinci bir terminalde):
 
@@ -65,4 +67,4 @@ npx expo start
 - Veritabanı ve FastAPI bilinçli olarak yoktur; kayıtlar backend belleğinde
   tutulur ve sunucu yeniden başlatılınca silinir. API sözleşmesi:
   `POST /api/trips`, `GET /api/trips`, `GET /api/stats`, `GET /api/health`,
-  `DELETE /api/trips`.
+  `DELETE /api/trips`, `GET /api/events` (SSE canlı akış).

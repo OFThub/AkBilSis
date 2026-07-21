@@ -9,6 +9,19 @@ const PORT = process.env.PORT || 4000;
 const trips = [];
 let nextId = 1;
 
+// SSE: panel tarayıcıları buradan dinler; yeni kayıt anında push edilir.
+const sseClients = new Set();
+
+function broadcast(event, data) {
+  const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) client.write(msg);
+}
+
+// Ara katmanların (proxy vb.) boşta kalan bağlantıyı kapatmaması için nabız
+setInterval(() => {
+  for (const client of sseClients) client.write(": hb\n\n");
+}, 30000).unref();
+
 app.use(express.json());
 
 // Mobil uygulama farklı origin'den istek atar (Expo) — CORS'a izin ver.
@@ -36,6 +49,18 @@ const REQUIRED_FIELDS = [
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, service: "akbil-backend", trips: trips.length });
+});
+
+app.get("/api/events", (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+  });
+  res.write("retry: 3000\n\n");
+  sseClients.add(res);
+  req.on("close", () => sseClients.delete(res));
 });
 
 app.post("/api/trips", (req, res) => {
@@ -68,21 +93,23 @@ app.post("/api/trips", (req, res) => {
     receivedAt: new Date().toISOString(),
   };
   trips.push(trip);
+  broadcast("trip", trip);
   res.status(201).json(trip);
 });
 
 app.get("/api/trips", (req, res) => {
   const limit = Number(req.query.limit) || trips.length;
-  // En yeni kayıtlar önce
-  const sorted = [...trips].sort(
-    (a, b) => new Date(b.boardTime) - new Date(a.boardTime)
-  );
+  // "Son yolculuklar" = sunucuya en son ulaşan kayıtlar; id geliş sırasını verir.
+  // boardTime'a göre sıralamak, gün geneline yayılmış seed verisinin taze
+  // mobil kayıtları ilk 12'nin dışına itmesine yol açıyordu.
+  const sorted = [...trips].sort((a, b) => b.id - a.id);
   res.json(sorted.slice(0, limit));
 });
 
 // Demo verisini sıfırlamak için
 app.delete("/api/trips", (req, res) => {
   trips.length = 0;
+  broadcast("reset", { trips: 0 });
   res.json({ ok: true, trips: 0 });
 });
 

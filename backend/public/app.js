@@ -6,7 +6,8 @@ const AMBER = "#c47a00";
 const GRID = "#e3e7f0";
 const INK2 = "#5a6478";
 
-const REFRESH_MS = 3000;
+// Yeni kayıtlar SSE ile anında gelir; polling yalnızca yedek güvenlik ağıdır
+const REFRESH_MS = 15000;
 const HOUR_LABELS = Array.from({ length: 24 }, (_, i) =>
   String(i).padStart(2, "0")
 );
@@ -267,6 +268,25 @@ document.getElementById("clearBtn").addEventListener("click", async () => {
   await fetch("/api/trips", { method: "DELETE" });
   refresh();
 });
+
+// Canlı akış: mobilden iniş kaydı düştüğü anda panel yenilenir
+const liveBadge = document.getElementById("liveBadge");
+const liveText = document.getElementById("liveText");
+
+function setLive(on) {
+  liveBadge.classList.toggle("offline", !on);
+  liveText.textContent = on ? "Canlı" : "Bağlanıyor…";
+}
+
+const events = new EventSource("/api/events");
+// Kopukluk sonrası yeniden bağlanınca da tetiklenir; kaçan kayıtları toparlar
+events.addEventListener("open", () => {
+  setLive(true);
+  refresh();
+});
+events.addEventListener("error", () => setLive(false));
+events.addEventListener("trip", refresh);
+events.addEventListener("reset", refresh);
 
 tickClock();
 setInterval(tickClock, 15000);
