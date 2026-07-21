@@ -11,19 +11,51 @@ import { postTrip } from "../api/client";
 import { FARES, findLine, travelMinutes } from "../data/lines";
 import {
   ActiveTrip,
-  CardInfo,
   CardType,
+  CardUser,
   Settings,
   TripRecord,
 } from "../types";
-import { randomCardNo } from "../utils/format";
+import { formatTL, round2 } from "../utils/format";
 
-const STORAGE_KEY = "akbil-state-v1";
+// v3: kart verisi kayıtlı kullanıcı listesine taşındı — etiket yalnızca ID sağlar
+const STORAGE_KEY = "akbil-state-v3";
+const LEGACY_KEYS = ["akbil-state-v2", "akbil-state-v1"];
+
+/** Kutudan çıkar çıkmaz test edilebilsin diye örnek kullanıcılar */
+function seedUsers(): CardUser[] {
+  return [
+    {
+      id: "u-ahmet",
+      name: "Ahmet Yılmaz",
+      cardNo: "1042 7316",
+      cardType: "tam",
+      balance: 150,
+    },
+    {
+      id: "u-zeynep",
+      name: "Zeynep Kaya",
+      cardNo: "2298 4471",
+      cardType: "ogrenci",
+      balance: 80,
+    },
+    {
+      id: "u-mehmet",
+      name: "Mehmet Demir",
+      cardNo: "3355 9028",
+      cardType: "tam",
+      balance: 40,
+    },
+  ];
+}
 
 interface AppState {
-  card: CardInfo;
+  /** Kayıtlı kartlar — kart verisinin tek kaynağı */
+  users: CardUser[];
   activeTrip: ActiveTrip | null;
   history: TripRecord[];
+  /** Kullanıcının yıldızladığı hat id'leri — Kart ekranındaki favori bölmesi */
+  favoriteLineIds: string[];
   settings: Settings;
 }
 
@@ -37,25 +69,39 @@ export interface AlightResult extends Result {
 interface AppApi extends AppState {
   ready: boolean;
   pendingCount: number;
-  setCardNo(cardNo: string): void;
-  setCardType(cardType: CardType): Result;
-  topUp(amount: number): void;
+  addUser(
+    name: string,
+    cardNo: string,
+    cardType: CardType,
+    tagId?: string
+  ): Result;
+  removeUser(id: string): void;
+  topUp(userId: string, amount: number): Result;
+  /** Okunan etiket ID'sini bir kullanıcıya bağlar (NFC açıkken) */
+  bindTag(userId: string, tagId: string): Result;
+  findUserByTagId(tagId: string): CardUser | undefined;
   board(lineId: string, stopIndex: number): Result;
-  alight(stopIndex: number): Promise<AlightResult>;
+  /** Yolculuğu bitirir; ücret okunan/seçilen kullanıcının bakiyesinden düşülür */
+  alight(stopIndex: number, userId: string): Promise<AlightResult>;
   retryPending(): Promise<number>;
+  /** Hattı favorilere ekler ya da çıkarır */
+  toggleFavorite(lineId: string): void;
   updateSettings(patch: Partial<Settings>): void;
   resetAll(): void;
 }
 
 function defaultState(): AppState {
   return {
-    card: { cardNo: randomCardNo(), cardType: "tam", balance: 100 },
+    users: seedUsers(),
     activeTrip: null,
     history: [],
+    favoriteLineIds: [],
     settings: {
       backendUrl: "http://localhost:4000",
       demoMode: false,
       demoHour: 8,
+      // Expo Go'da native NFC yok — varsayılan kapalı ki liste modu hemen çalışsın
+      nfcEnabled: false,
     },
   };
 }
@@ -67,14 +113,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const loadedRef = useRef(false);
 
-  // Kalıcı durum: açılışta yükle
+  // Kalıcı durum: açılışta yükle (eski sürüm kayıtları da okunur)
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        let raw = await AsyncStorage.getItem(STORAGE_KEY);
+        for (const key of LEGACY_KEYS) {
+          if (raw) break;
+          raw = await AsyncStorage.getItem(key);
+        }
         if (raw) {
-          const saved = JSON.parse(raw) as AppState;
-          setState({ ...defaultState(), ...saved });
+          const saved = JSON.parse(raw) as Partial<AppState>;
+          const base = defaultState();
+          setState({
+            // Eski kayıtlarda kullanıcı listesi yok — örneklerle başlat
+            users:
+              Array.isArray(saved.users) && saved.users.length > 0
+                ? saved.users
+                : base.users,
+            activeTrip: saved.activeTrip ?? null,
+            history: Array.isArray(saved.history) ? saved.history : [],
+            favoriteLineIds: Array.isArray(saved.favoriteLineIds)
+              ? saved.favoriteLineIds
+              : [],
+            settings: { ...base.settings, ...(saved.settings ?? {}) },
+          });
         }
       } catch {
         // Bozuk kayıt varsa varsayılanla devam et
@@ -91,30 +154,88 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => {});
   }, [state]);
 
-  const setCardNo = useCallback((cardNo: string) => {
-    setState((s) => ({ ...s, card: { ...s.card, cardNo } }));
-  }, []);
-
-  const setCardType = useCallback(
-    (cardType: CardType): Result => {
-      if (state.activeTrip) {
-        return {
-          ok: false,
-          error: "Yolculuk sırasında kart tipi değiştirilemez.",
-        };
+  const addUser = useCallback(
+    (
+      name: string,
+      cardNo: string,
+      cardType: CardType,
+      tagId?: string
+    ): Result => {
+      const trimmedName = name.trim();
+      const trimmedCard = cardNo.trim();
+      if (!trimmedName) return { ok: false, error: "Kullanıcı adı boş olamaz." };
+      if (!trimmedCard) return { ok: false, error: "Kart numarası boş olamaz." };
+      if (state.users.some((u) => u.cardNo === trimmedCard)) {
+        return { ok: false, error: "Bu kart numarası zaten kayıtlı." };
       }
-      setState((s) => ({ ...s, card: { ...s.card, cardType } }));
+      if (tagId && state.users.some((u) => u.tagId === tagId)) {
+        return { ok: false, error: "Bu etiket zaten başka bir kullanıcıya bağlı." };
+      }
+      const user: CardUser = {
+        id: `u-${Date.now()}-${Math.floor(Math.random() * 1e4)}`,
+        name: trimmedName,
+        cardNo: trimmedCard,
+        cardType,
+        balance: 0,
+        ...(tagId ? { tagId } : {}),
+      };
+      setState((s) => ({ ...s, users: [...s.users, user] }));
       return { ok: true };
     },
-    [state.activeTrip]
+    [state.users]
   );
 
-  const topUp = useCallback((amount: number) => {
-    setState((s) => ({
-      ...s,
-      card: { ...s.card, balance: Math.round((s.card.balance + amount) * 100) / 100 },
-    }));
+  const removeUser = useCallback((id: string) => {
+    setState((s) => ({ ...s, users: s.users.filter((u) => u.id !== id) }));
   }, []);
+
+  const topUp = useCallback(
+    (userId: string, amount: number): Result => {
+      if (amount <= 0) {
+        return { ok: false, error: "Tutar sıfırdan büyük olmalı." };
+      }
+      if (!state.users.some((u) => u.id === userId)) {
+        return { ok: false, error: "Kayıtlı kullanıcı bulunamadı." };
+      }
+      setState((s) => ({
+        ...s,
+        users: s.users.map((u) =>
+          u.id === userId ? { ...u, balance: round2(u.balance + amount) } : u
+        ),
+      }));
+      return { ok: true };
+    },
+    [state.users]
+  );
+
+  const bindTag = useCallback(
+    (userId: string, tagId: string): Result => {
+      const owner = state.users.find(
+        (u) => u.tagId === tagId && u.id !== userId
+      );
+      if (owner) {
+        return {
+          ok: false,
+          error: `Bu etiket zaten ${owner.name} kullanıcısına bağlı.`,
+        };
+      }
+      if (!state.users.some((u) => u.id === userId)) {
+        return { ok: false, error: "Kayıtlı kullanıcı bulunamadı." };
+      }
+      setState((s) => ({
+        ...s,
+        users: s.users.map((u) => (u.id === userId ? { ...u, tagId } : u)),
+      }));
+      return { ok: true };
+    },
+    [state.users]
+  );
+
+  const findUserByTagId = useCallback(
+    (tagId: string): CardUser | undefined =>
+      state.users.find((u) => u.tagId === tagId),
+    [state.users]
+  );
 
   const board = useCallback(
     (lineId: string, stopIndex: number): Result => {
@@ -129,15 +250,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (stopIndex < 0 || stopIndex >= line.stops.length - 1) {
         return { ok: false, error: "Son duraktan biniş yapılamaz." };
       }
-      const fare = FARES[state.card.cardType];
-      if (state.card.balance < fare) {
-        return {
-          ok: false,
-          error: "Bakiye yetersiz. Kartım ekranından bakiye yükleyin.",
-        };
-      }
 
-      // Biniş saati = şimdiki zaman (demo modunda saat elle seçilir)
+      // Ücret inişte, kartı belirlenen kullanıcının tipine göre düşülür
       const now = new Date();
       if (state.settings.demoMode) {
         now.setHours(state.settings.demoHour);
@@ -145,32 +259,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       setState((s) => ({
         ...s,
-        card: {
-          ...s.card,
-          balance: Math.round((s.card.balance - fare) * 100) / 100,
-        },
         activeTrip: {
           lineId,
           boardingStopIndex: stopIndex,
           boardTime: now.toISOString(),
-          fare,
         },
       }));
       return { ok: true };
     },
-    [state.activeTrip, state.card, state.settings]
+    [state.activeTrip, state.settings]
   );
 
   const alight = useCallback(
-    async (stopIndex: number): Promise<AlightResult> => {
+    async (stopIndex: number, userId: string): Promise<AlightResult> => {
       const trip = state.activeTrip;
       if (!trip) return { ok: false, error: "Aktif yolculuk yok." };
       const line = findLine(trip.lineId);
       if (!line) return { ok: false, error: "Hat bulunamadı." };
       if (stopIndex <= trip.boardingStopIndex || stopIndex >= line.stops.length) {
+        return { ok: false, error: "İniş durağı biniş durağından sonra olmalı." };
+      }
+      const user = state.users.find((u) => u.id === userId);
+      if (!user) return { ok: false, error: "Kayıtlı kullanıcı bulunamadı." };
+
+      const fare = FARES[user.cardType];
+      if (user.balance < fare) {
         return {
           ok: false,
-          error: "İniş durağı biniş durağından sonra olmalı.",
+          error: `Bakiye yetersiz — ${user.name} kartında ${formatTL(
+            user.balance
+          )} var, ücret ${formatTL(fare)}. Kart ekranından bakiye yükleyin.`,
         };
       }
 
@@ -178,26 +296,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const durationMin = travelMinutes(line, trip.boardingStopIndex, stopIndex);
       const boardDate = new Date(trip.boardTime);
       const alightDate = new Date(boardDate.getTime() + durationMin * 60000);
+      const balanceAfter = round2(user.balance - fare);
 
       const record: TripRecord = {
         localId: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
-        cardNo: state.card.cardNo,
-        cardType: state.card.cardType,
+        cardNo: user.cardNo,
+        cardType: user.cardType,
         line: line.name,
         boardingStop: line.stops[trip.boardingStopIndex],
         alightingStop: line.stops[stopIndex],
         boardTime: trip.boardTime,
         alightTime: alightDate.toISOString(),
         durationMin,
-        fare: trip.fare,
+        fare,
+        balanceAfter,
         status: "pending",
       };
 
-      // Önce yerelde bitir (iniş), sonra göndermeyi dene
+      // Önce yerelde bitir (iniş + bakiye düş), sonra göndermeyi dene
       setState((s) => ({
         ...s,
         activeTrip: null,
         history: [record, ...s.history],
+        users: s.users.map((u) =>
+          u.id === userId ? { ...u, balance: balanceAfter } : u
+        ),
       }));
 
       const sent = await postTrip(state.settings.backendUrl, record);
@@ -211,7 +334,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       return { ok: true, record, sent };
     },
-    [state.activeTrip, state.card, state.settings]
+    [state.activeTrip, state.users, state.settings]
   );
 
   const retryPending = useCallback(async (): Promise<number> => {
@@ -232,6 +355,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return sentCount;
   }, [state.history, state.settings]);
 
+  const toggleFavorite = useCallback((lineId: string) => {
+    setState((s) => ({
+      ...s,
+      favoriteLineIds: s.favoriteLineIds.includes(lineId)
+        ? s.favoriteLineIds.filter((id) => id !== lineId)
+        : [...s.favoriteLineIds, lineId],
+    }));
+  }, []);
+
   const updateSettings = useCallback((patch: Partial<Settings>) => {
     setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
   }, []);
@@ -239,8 +371,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const resetAll = useCallback(() => {
     setState((s) => {
       const fresh = defaultState();
-      // Backend adresi kullanıcı emeği — sıfırlamada koru
+      // Backend adresi, NFC modu ve favoriler kullanıcı emeği — sıfırlamada koru
       fresh.settings.backendUrl = s.settings.backendUrl;
+      fresh.settings.nfcEnabled = s.settings.nfcEnabled;
+      fresh.favoriteLineIds = s.favoriteLineIds;
       return fresh;
     });
   }, []);
@@ -249,12 +383,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ...state,
     ready,
     pendingCount: state.history.filter((r) => r.status === "pending").length,
-    setCardNo,
-    setCardType,
+    addUser,
+    removeUser,
     topUp,
+    bindTag,
+    findUserByTagId,
     board,
     alight,
     retryPending,
+    toggleFavorite,
     updateSettings,
     resetAll,
   };

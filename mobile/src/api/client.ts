@@ -26,11 +26,16 @@ export async function postTrip(
   record: TripRecord
 ): Promise<boolean> {
   try {
-    const { localId, status, ...payload } = record;
+    // NFC'den okunan güncel bakiye "balance" adıyla gider
+    const { localId, status, balanceAfter, ...payload } = record;
+    const body =
+      balanceAfter === undefined
+        ? payload
+        : { ...payload, balance: balanceAfter };
     const res = await fetchWithTimeout(`${normalize(baseUrl)}/api/trips`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     return res.ok;
   } catch {

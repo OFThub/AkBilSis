@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Image,
   Pressable,
@@ -11,78 +11,295 @@ import {
 import { useApp } from "../context/AppContext";
 import { FARES } from "../data/lines";
 import { colors, radius } from "../theme";
-import { formatTL } from "../utils/format";
+import { formatTL, randomCardNo } from "../utils/format";
 import {
   Header,
   InfoBanner,
+  PrimaryButton,
   SectionCard,
   SectionTitle,
 } from "../components/UI";
-import { CardType } from "../types";
+import NfcPrompt from "../components/NfcPrompt";
+import UserPicker from "../components/UserPicker";
+import { NfcError, cancelCardScan, readTagId } from "../nfc/nfcCard";
+import { CardType, CardUser } from "../types";
 
 const TOP_UP_AMOUNTS = [50, 100, 250];
 
+type Notice = { tone: "info" | "error" | "success"; text: string } | null;
+
+/**
+ * Kart işlemleri. İki mod birbirini dışlar:
+ *  - NFC açık   → yalnızca etiket okutma; kullanıcı listesi hiç gösterilmez
+ *  - NFC kapalı → yalnızca kayıtlı kullanıcı listesi; okutma arayüzü gösterilmez
+ */
 export default function CardScreen() {
   const app = useApp();
-  const [error, setError] = useState<string | null>(null);
+  const nfcOn = app.settings.nfcEnabled;
 
-  function changeType(type: CardType) {
-    setError(null);
-    const result = app.setCardType(type);
-    if (!result.ok) setError(result.error ?? "Kart tipi değiştirilemedi.");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [amount, setAmount] = useState(TOP_UP_AMOUNTS[0]);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  /** Okunan ama hiçbir kullanıcıya bağlı olmayan etiket */
+  const [unknownTagId, setUnknownTagId] = useState<string | null>(null);
+
+  const [newName, setNewName] = useState("");
+  const [newCardNo, setNewCardNo] = useState(randomCardNo());
+  const [newType, setNewType] = useState<CardType>("tam");
+
+  const selected = app.users.find((u) => u.id === selectedId) ?? null;
+
+  // Ekrandan çıkarken açık NFC oturumunu kapat
+  useEffect(() => () => cancelCardScan(), []);
+
+  // Mod değişince diğer modun geçici durumunu temizle
+  useEffect(() => {
+    setSelectedId(null);
+    setUnknownTagId(null);
+    setScanError(null);
+    setNotice(null);
+  }, [nfcOn]);
+
+  async function handleScan() {
+    setNotice(null);
+    setScanError(null);
+    setUnknownTagId(null);
+    setScanning(true);
+    try {
+      const tagId = await readTagId();
+      const user = app.findUserByTagId(tagId);
+      if (user) {
+        setSelectedId(user.id);
+        setNotice({
+          tone: "success",
+          text: `${user.name} — bakiye ${formatTL(user.balance)}.`,
+        });
+      } else {
+        setSelectedId(null);
+        setUnknownTagId(tagId);
+        setNotice({
+          tone: "info",
+          text: `Bu etiket (${tagId}) kayıtlı değil. Aşağıdan bu etikete bir kullanıcı tanımlayabilirsiniz.`,
+        });
+      }
+    } catch (e) {
+      const err = e as NfcError;
+      if (err.code !== "cancelled") setScanError(err.message);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  function handleTopUp() {
+    if (!selected) {
+      setNotice({
+        tone: "error",
+        text: nfcOn ? "Önce kartı okutun." : "Önce listeden kullanıcı seçin.",
+      });
+      return;
+    }
+    const result = app.topUp(selected.id, amount);
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.error ?? "Yükleme yapılamadı." });
+      return;
+    }
+    setNotice({
+      tone: "success",
+      text: `${selected.name} kartına ${formatTL(amount)} yüklendi.`,
+    });
+  }
+
+  function handleAddUser() {
+    const result = app.addUser(
+      newName,
+      newCardNo,
+      newType,
+      unknownTagId ?? undefined
+    );
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.error ?? "Kullanıcı eklenemedi." });
+      return;
+    }
+    setNotice({
+      tone: "success",
+      text: unknownTagId
+        ? `${newName.trim()} eklendi ve okunan etikete bağlandı.`
+        : `${newName.trim()} kayıtlı kullanıcılara eklendi.`,
+    });
+    setNewName("");
+    setNewCardNo(randomCardNo());
+    setUnknownTagId(null);
+  }
+
+  function handleRemove(user: CardUser) {
+    app.removeUser(user.id);
+    if (selectedId === user.id) setSelectedId(null);
+    setNotice({ tone: "info", text: `${user.name} listeden kaldırıldı.` });
   }
 
   return (
     <View style={styles.root}>
-      <Header title="Kartım" subtitle="Sanal akbil kartınız" />
+      <Header
+        title="Kart"
+        subtitle={nfcOn ? "NFC ile kart işlemleri" : "Kayıtlı kullanıcı kartları"}
+      />
       <ScrollView contentContainerStyle={styles.content}>
-        {/* Sanal kart: lacivert zemin + amblem filigranı */}
-        <View style={styles.virtualCard}>
-          <Image
-            source={require("../../assets/logo.png")}
-            style={styles.watermark}
-            resizeMode="contain"
-          />
-          <View style={styles.cardTopRow}>
+        {selected ? (
+          <View style={styles.virtualCard}>
             <Image
-              source={require("../../assets/logo-2.png")}
-              style={styles.cardBrand}
+              source={require("../../assets/logo.png")}
+              style={styles.watermark}
               resizeMode="contain"
             />
-            <View
-              style={[
-                styles.typeBadge,
-                app.card.cardType === "ogrenci" && styles.typeBadgeStudent,
-              ]}
-            >
-              <Text style={styles.typeBadgeText}>
-                {app.card.cardType === "tam" ? "TAM" : "ÖĞRENCİ"}
-              </Text>
+            <View style={styles.cardTopRow}>
+              <Image
+                source={require("../../assets/logo-2.png")}
+                style={styles.cardBrand}
+                resizeMode="contain"
+              />
+              <View
+                style={[
+                  styles.typeBadge,
+                  selected.cardType === "ogrenci" && styles.typeBadgeStudent,
+                ]}
+              >
+                <Text style={styles.typeBadgeText}>
+                  {selected.cardType === "tam" ? "TAM" : "ÖĞRENCİ"}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.cardHolder}>{selected.name}</Text>
+            <Text style={styles.cardNumber}>{selected.cardNo}</Text>
+            <View style={styles.cardBottomRow}>
+              <View>
+                <Text style={styles.balanceLabel}>Bakiye</Text>
+                <Text style={styles.balanceValue}>
+                  {formatTL(selected.balance)}
+                </Text>
+              </View>
+              <Text style={styles.cardFooter}>AKBİL</Text>
             </View>
           </View>
-          <Text style={styles.cardNumber}>{app.card.cardNo}</Text>
-          <View style={styles.cardBottomRow}>
-            <View>
-              <Text style={styles.balanceLabel}>Bakiye</Text>
-              <Text style={styles.balanceValue}>
-                {formatTL(app.card.balance)}
-              </Text>
-            </View>
-            <Text style={styles.cardFooter}>AKBİL</Text>
+        ) : (
+          <View style={[styles.virtualCard, styles.cardPlaceholder]}>
+            <Text style={styles.placeholderTitle}>
+              {nfcOn ? "Kart okutulmadı" : "Kullanıcı seçilmedi"}
+            </Text>
+            <Text style={styles.placeholderText}>
+              {nfcOn
+                ? "Kartı okutun; etiketin kimliğine bağlı kullanıcı burada görünür."
+                : "Aşağıdaki listeden bir kullanıcı seçin."}
+            </Text>
           </View>
-        </View>
+        )}
 
-        {error && <InfoBanner tone="error" text={error} />}
+        {notice && <InfoBanner tone={notice.tone} text={notice.text} />}
+
+        {/* ── NFC AÇIK: yalnızca okutma ── */}
+        {nfcOn && (
+          <SectionCard>
+            <SectionTitle>Kart okut</SectionTitle>
+            {scanning || scanError ? (
+              <NfcPrompt
+                state={scanError ? "error" : "waiting"}
+                error={scanError ?? undefined}
+                onRetry={handleScan}
+                onCancel={() => {
+                  cancelCardScan();
+                  setScanning(false);
+                  setScanError(null);
+                }}
+              />
+            ) : (
+              <PrimaryButton label="Kartı Okut" onPress={handleScan} />
+            )}
+            <Text style={styles.hint}>
+              Etiket yalnızca kimlik sağlar; bakiye ve kart bilgisi uygulamadaki
+              kayıtta tutulur, etikete hiçbir şey yazılmaz.
+            </Text>
+          </SectionCard>
+        )}
+
+        {/* ── NFC KAPALI: yalnızca kullanıcı listesi ── */}
+        {!nfcOn && (
+          <SectionCard>
+            <SectionTitle>Kayıtlı kullanıcılar</SectionTitle>
+            <UserPicker
+              users={app.users}
+              selectedId={selectedId}
+              onSelect={(u) => {
+                setSelectedId(u.id);
+                setNotice(null);
+              }}
+              onRemove={handleRemove}
+            />
+          </SectionCard>
+        )}
 
         <SectionCard>
-          <SectionTitle>Kart tipi</SectionTitle>
-          <View style={styles.typeRow}>
+          <SectionTitle>Bakiye yükle</SectionTitle>
+          <View style={styles.amountRow}>
+            {TOP_UP_AMOUNTS.map((value) => {
+              const active = amount === value;
+              return (
+                <Pressable
+                  key={value}
+                  onPress={() => setAmount(value)}
+                  style={[styles.amountChip, active && styles.amountChipActive]}
+                >
+                  <Text
+                    style={[
+                      styles.amountLabel,
+                      active && styles.amountLabelActive,
+                    ]}
+                  >
+                    +{formatTL(value)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <PrimaryButton
+            label={
+              selected
+                ? `${selected.name} kartına ${formatTL(amount)} yükle`
+                : `${formatTL(amount)} Yükle`
+            }
+            onPress={handleTopUp}
+            disabled={!selected}
+          />
+        </SectionCard>
+
+        <SectionCard>
+          <SectionTitle>
+            {unknownTagId ? "Bu etikete kullanıcı tanımla" : "Yeni kullanıcı"}
+          </SectionTitle>
+          {unknownTagId && (
+            <Text style={styles.tagLine}>Etiket kimliği: {unknownTagId}</Text>
+          )}
+          <TextInput
+            value={newName}
+            onChangeText={setNewName}
+            style={styles.input}
+            placeholder="Ad Soyad"
+            placeholderTextColor={colors.ink3}
+          />
+          <TextInput
+            value={newCardNo}
+            onChangeText={setNewCardNo}
+            style={[styles.input, { marginTop: 10 }]}
+            placeholder="Kart no — örn. 1042 7316"
+            placeholderTextColor={colors.ink3}
+          />
+          <View style={[styles.typeRow, { marginTop: 10 }]}>
             {(["tam", "ogrenci"] as CardType[]).map((type) => {
-              const active = app.card.cardType === type;
+              const active = newType === type;
               return (
                 <Pressable
                   key={type}
-                  onPress={() => changeType(type)}
+                  onPress={() => setNewType(type)}
                   style={[styles.typeOption, active && styles.typeOptionActive]}
                 >
                   <Text
@@ -105,38 +322,13 @@ export default function CardScreen() {
               );
             })}
           </View>
-        </SectionCard>
-
-        <SectionCard>
-          <SectionTitle>Bakiye yükle</SectionTitle>
-          <View style={styles.topUpRow}>
-            {TOP_UP_AMOUNTS.map((amount) => (
-              <Pressable
-                key={amount}
-                onPress={() => app.topUp(amount)}
-                style={({ pressed }) => [
-                  styles.topUpButton,
-                  pressed && { opacity: 0.8 },
-                ]}
-              >
-                <Text style={styles.topUpLabel}>+{formatTL(amount)}</Text>
-              </Pressable>
-            ))}
+          <View style={{ marginTop: 12 }}>
+            <PrimaryButton
+              label={unknownTagId ? "Ekle ve Etikete Bağla" : "Kullanıcı Ekle"}
+              onPress={handleAddUser}
+            />
           </View>
-        </SectionCard>
-
-        <SectionCard>
-          <SectionTitle>Kart numarası</SectionTitle>
-          <TextInput
-            value={app.card.cardNo}
-            onChangeText={app.setCardNo}
-            style={styles.input}
-            placeholder="Örn. 1042 7316"
-            placeholderTextColor={colors.ink3}
-          />
-          <Text style={styles.hint}>
-            Kayıtlar izleme merkezine bu numarayla gönderilir.
-          </Text>
+          <Text style={styles.hint}>Yeni kullanıcı ₺0,00 bakiye ile başlar.</Text>
         </SectionCard>
       </ScrollView>
     </View>
@@ -154,6 +346,15 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     minHeight: 190,
     justifyContent: "space-between",
+  },
+  cardPlaceholder: { alignItems: "center", justifyContent: "center", gap: 6 },
+  placeholderTitle: { color: "#ffffff", fontSize: 17, fontWeight: "800" },
+  placeholderText: {
+    color: "#b9c3de",
+    fontSize: 13,
+    textAlign: "center",
+    maxWidth: 270,
+    lineHeight: 18,
   },
   watermark: {
     position: "absolute",
@@ -182,12 +383,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 1,
   },
+  cardHolder: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 14,
+  },
   cardNumber: {
     color: "#ffffff",
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: "700",
     letterSpacing: 4,
-    marginVertical: 18,
+    marginTop: 4,
+    marginBottom: 14,
     fontVariant: ["tabular-nums"],
   },
   cardBottomRow: {
@@ -214,6 +422,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     letterSpacing: 3,
   },
+  amountRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
+  amountChip: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.control,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  amountChipActive: {
+    borderColor: colors.blue,
+    backgroundColor: colors.chipBlueBg,
+  },
+  amountLabel: { fontSize: 15, fontWeight: "800", color: colors.ink2 },
+  amountLabelActive: { color: colors.navy900 },
   typeRow: { flexDirection: "row", gap: 10 },
   typeOption: {
     flex: 1,
@@ -231,25 +454,22 @@ const styles = StyleSheet.create({
   typeOptionLabel: { fontSize: 15, fontWeight: "700", color: colors.ink2 },
   typeOptionFare: { fontSize: 12.5, color: colors.ink3, fontWeight: "600" },
   typeOptionLabelActive: { color: colors.navy900 },
-  topUpRow: { flexDirection: "row", gap: 10 },
-  topUpButton: {
-    flex: 1,
-    backgroundColor: colors.navy700,
-    borderRadius: radius.control,
-    paddingVertical: 13,
-    alignItems: "center",
-  },
-  topUpLabel: { color: "#ffffff", fontWeight: "800", fontSize: 15 },
   input: {
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: radius.control,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 15,
+    fontWeight: "600",
     color: colors.ink,
     backgroundColor: colors.surface,
   },
-  hint: { fontSize: 12.5, color: colors.ink3, marginTop: 8, lineHeight: 17 },
+  tagLine: {
+    fontSize: 12.5,
+    color: colors.blue,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+  hint: { fontSize: 12.5, color: colors.ink3, marginTop: 10, lineHeight: 17 },
 });

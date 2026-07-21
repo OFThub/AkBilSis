@@ -141,6 +141,29 @@ export default function SettingsScreen() {
         </SectionCard>
 
         <SectionCard>
+          <View style={styles.switchRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.switchTitle}>NFC</Text>
+              <Text style={styles.hint}>
+                Açık: kart okutulur, etiketin kimliğine bağlı kayıtlı kullanıcı
+                bulunur — kullanıcı listesi gösterilmez. Kapalı: NFC tamamen
+                devre dışı kalır, kullanıcı kayıtlı listeden seçilir — okutma
+                arayüzü gösterilmez. Expo Go native NFC içermediği için orada
+                kapalı kullanın.
+              </Text>
+            </View>
+            <Switch
+              value={app.settings.nfcEnabled}
+              onValueChange={(value) =>
+                app.updateSettings({ nfcEnabled: value })
+              }
+              trackColor={{ true: colors.blue, false: colors.line }}
+              thumbColor="#ffffff"
+            />
+          </View>
+        </SectionCard>
+
+        <SectionCard>
           <SectionTitle>Uygulama</SectionTitle>
           <PrimaryButton
             label={
@@ -152,8 +175,9 @@ export default function SettingsScreen() {
             tone="danger"
           />
           <Text style={styles.hint}>
-            Kart, bakiye ve yolculuk geçmişi silinir; izleme merkezi adresi
-            korunur.
+            Aktif yolculuk ve yolculuk geçmişi silinir; izleme merkezi adresi
+            ile NFC modu korunur. Karttaki bakiye etikette durduğu için
+            etkilenmez.
           </Text>
         </SectionCard>
 

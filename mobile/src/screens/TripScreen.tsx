@@ -1,11 +1,5 @@
-import React, { useMemo, useRef, useState } from "react";
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useApp } from "../context/AppContext";
 import { FARES, LINES, cumulativeMinutes, findLine } from "../data/lines";
 import { colors, radius } from "../theme";
@@ -17,16 +11,26 @@ import {
   SectionCard,
   SectionTitle,
 } from "../components/UI";
+import NfcPrompt from "../components/NfcPrompt";
+import UserPicker from "../components/UserPicker";
+import { NfcError, cancelCardScan, readTagId } from "../nfc/nfcCard";
+import { CardUser } from "../types";
 
 type Notice = { tone: "info" | "error" | "success"; text: string } | null;
 
 export default function TripScreen() {
   const app = useApp();
+  const nfcOn = app.settings.nfcEnabled;
+
   const [selectedLineId, setSelectedLineId] = useState(LINES[0].id);
   const [boardingIndex, setBoardingIndex] = useState<number | null>(null);
   const [alightIndex, setAlightIndex] = useState<number | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  const [scanState, setScanState] = useState<"waiting" | "error">("waiting");
+  const [scanError, setScanError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  // Durak değişince/ekran kapanınca eski okuma sonucunu yok saymak için
+  const scanTokenRef = useRef(0);
 
   // Bant sayfanın üstünde; düğmeler ise listenin altında kalabildiği için
   // sonuç mesajı gösterilirken en üste kaydır — aksi hâlde hata gözden kaçıyor
@@ -38,7 +42,6 @@ export default function TripScreen() {
   const onTrip = app.activeTrip !== null;
   const tripLine = onTrip ? findLine(app.activeTrip!.lineId) : undefined;
   const selectedLine = findLine(selectedLineId)!;
-  const fare = FARES[app.card.cardType];
 
   const cumMinutes = useMemo(() => {
     if (onTrip && tripLine) {
@@ -46,6 +49,81 @@ export default function TripScreen() {
     }
     return [];
   }, [onTrip, tripLine, app.activeTrip]);
+
+  // NFC açıkken: iniş durağı seçilir seçilmez okuma başlar. "İn" butonu yoktur,
+  // yolculuk yalnızca kart okutulunca biter.
+  useEffect(() => {
+    if (!nfcOn || !onTrip || alightIndex === null) return;
+    const token = ++scanTokenRef.current;
+    runAlightScan(alightIndex, token);
+    return () => {
+      scanTokenRef.current++;
+      cancelCardScan();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nfcOn, onTrip, alightIndex]);
+
+  async function runAlightScan(stopIndex: number, token: number) {
+    setScanState("waiting");
+    setScanError(null);
+    try {
+      const tagId = await readTagId();
+      if (token !== scanTokenRef.current) return;
+      const user = app.findUserByTagId(tagId);
+      if (!user) {
+        setScanState("error");
+        setScanError(
+          `Bu etiket (${tagId}) hiçbir kullanıcıya bağlı değil. Kart ekranından bu etikete kullanıcı tanımlayın.`
+        );
+        return;
+      }
+      await finishAlight(stopIndex, user, token);
+    } catch (e) {
+      if (token !== scanTokenRef.current) return;
+      const err = e as NfcError;
+      if (err.code === "cancelled") return;
+      setScanState("error");
+      setScanError(err.message || "Kart okunamadı.");
+    }
+  }
+
+  async function finishAlight(stopIndex: number, user: CardUser, token?: number) {
+    const result = await app.alight(stopIndex, user.id);
+    if (token !== undefined && token !== scanTokenRef.current) return;
+    if (!result.ok) {
+      if (nfcOn) {
+        setScanState("error");
+        setScanError(result.error ?? "İniş yapılamadı.");
+      } else {
+        showNotice({ tone: "error", text: result.error ?? "İniş yapılamadı." });
+      }
+      return;
+    }
+    setAlightIndex(null);
+    const record = result.record!;
+    const base = `${user.name} indi — ${formatTL(record.fare)} düşüldü, kalan bakiye ${formatTL(
+      record.balanceAfter ?? 0
+    )}.`;
+    showNotice(
+      result.sent
+        ? {
+            tone: "success",
+            text: `${base} Kayıt izleme merkezine gönderildi (${hhmm(
+              record.boardTime
+            )} – ${hhmm(record.alightTime)}).`,
+          }
+        : {
+            tone: "info",
+            text: `${base} Sunucuya ulaşılamadı — Geçmiş ekranından tekrar gönderebilirsiniz.`,
+          }
+    );
+  }
+
+  function retryAlightScan() {
+    if (alightIndex === null) return;
+    const token = ++scanTokenRef.current;
+    runAlightScan(alightIndex, token);
+  }
 
   function handleBoard() {
     setNotice(null);
@@ -60,37 +138,12 @@ export default function TripScreen() {
     }
     showNotice({
       tone: "success",
-      text: `Kart basıldı — ${formatTL(fare)} düşüldü. İyi yolculuklar!`,
+      text: nfcOn
+        ? "Biniş kaydedildi — iniş yalnızca kart okutarak yapılır. İyi yolculuklar!"
+        : "Biniş kaydedildi — inerken listeden kullanıcı seçin. İyi yolculuklar!",
     });
     setBoardingIndex(null);
     setAlightIndex(null);
-  }
-
-  async function handleAlight() {
-    setNotice(null);
-    if (alightIndex === null) {
-      showNotice({ tone: "error", text: "Önce indiğiniz durağı seçin." });
-      return;
-    }
-    const result = await app.alight(alightIndex);
-    if (!result.ok) {
-      showNotice({ tone: "error", text: result.error ?? "İniş yapılamadı." });
-      return;
-    }
-    setAlightIndex(null);
-    showNotice(
-      result.sent
-        ? {
-            tone: "success",
-            text: `Yolculuk tamamlandı ve izleme merkezine gönderildi (${hhmm(
-              result.record!.boardTime
-            )} – ${hhmm(result.record!.alightTime)}).`,
-          }
-        : {
-            tone: "info",
-            text: "Yolculuk kaydedildi. Sunucuya ulaşılamadı — Geçmiş ekranından tekrar gönderebilirsiniz.",
-          }
-    );
   }
 
   return (
@@ -142,14 +195,13 @@ export default function TripScreen() {
               <SectionTitle>Bindiğiniz durak</SectionTitle>
               {selectedLine.stops.map((stop, idx) => {
                 const isLast = idx === selectedLine.stops.length - 1;
-                const selected = boardingIndex === idx;
                 return (
                   <StopRow
                     key={stop}
                     name={stop}
                     first={idx === 0}
                     last={isLast}
-                    selected={selected}
+                    selected={boardingIndex === idx}
                     disabled={isLast}
                     note={isLast ? "Son durak — biniş yok" : undefined}
                     onPress={() => setBoardingIndex(idx)}
@@ -161,24 +213,18 @@ export default function TripScreen() {
             <SectionCard>
               <View style={styles.fareRow}>
                 <View>
-                  <Text style={styles.fareLabel}>
-                    {app.card.cardType === "tam" ? "Tam" : "Öğrenci"} bilet
-                  </Text>
-                  <Text style={styles.fareValue}>{formatTL(fare)}</Text>
+                  <Text style={styles.fareLabel}>Tam bilet</Text>
+                  <Text style={styles.fareValue}>{formatTL(FARES.tam)}</Text>
                 </View>
                 <View style={{ alignItems: "flex-end" }}>
-                  <Text style={styles.fareLabel}>Kart bakiyesi</Text>
-                  <Text
-                    style={[
-                      styles.fareValue,
-                      app.card.balance < fare && { color: colors.danger },
-                    ]}
-                  >
-                    {formatTL(app.card.balance)}
-                  </Text>
+                  <Text style={styles.fareLabel}>Öğrenci bilet</Text>
+                  <Text style={styles.fareValue}>{formatTL(FARES.ogrenci)}</Text>
                 </View>
               </View>
-              <PrimaryButton label="Kart Bas (Bin)" onPress={handleBoard} />
+              <Text style={styles.fareNote}>
+                Ücret inişte, kartı belirlenen kullanıcının tipine göre düşülür.
+              </Text>
+              <PrimaryButton label="Bin (Yolculuğu Başlat)" onPress={handleBoard} />
             </SectionCard>
           </>
         )}
@@ -193,7 +239,9 @@ export default function TripScreen() {
                 {hhmm(app.activeTrip!.boardTime)}
               </Text>
               <Text style={styles.tripBannerNote}>
-                İnmeden yeni biniş yapılamaz.
+                {nfcOn
+                  ? "İniş yalnızca kart okutarak yapılır — inmeden yeni biniş yapılamaz."
+                  : "İnmek için durağı seçip listeden kullanıcıyı işaretleyin."}
               </Text>
             </View>
 
@@ -201,7 +249,6 @@ export default function TripScreen() {
               <SectionTitle>İndiğiniz durak</SectionTitle>
               {tripLine.stops.map((stop, idx) => {
                 const before = idx <= app.activeTrip!.boardingStopIndex;
-                const selected = alightIndex === idx;
                 const isBoarding = idx === app.activeTrip!.boardingStopIndex;
                 return (
                   <StopRow
@@ -209,7 +256,7 @@ export default function TripScreen() {
                     name={stop}
                     first={idx === 0}
                     last={idx === tripLine.stops.length - 1}
-                    selected={selected}
+                    selected={alightIndex === idx}
                     disabled={before}
                     highlight={isBoarding}
                     note={
@@ -226,30 +273,62 @@ export default function TripScreen() {
             </SectionCard>
 
             {alightIndex !== null && (
-              <SectionCard>
-                <View style={styles.fareRow}>
-                  <View>
-                    <Text style={styles.fareLabel}>Tahmini iniş saati</Text>
-                    <Text style={styles.fareValue}>
-                      {hhmm(
-                        new Date(
-                          new Date(app.activeTrip!.boardTime).getTime() +
-                            cumMinutes[alightIndex] * 60000
-                        ).toISOString()
-                      )}
-                    </Text>
+              <>
+                <SectionCard>
+                  <View style={styles.fareRow}>
+                    <View>
+                      <Text style={styles.fareLabel}>Tahmini iniş saati</Text>
+                      <Text style={styles.fareValue}>
+                        {hhmm(
+                          new Date(
+                            new Date(app.activeTrip!.boardTime).getTime() +
+                              cumMinutes[alightIndex] * 60000
+                          ).toISOString()
+                        )}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={styles.fareLabel}>Yolculuk süresi</Text>
+                      <Text style={styles.fareValue}>
+                        {cumMinutes[alightIndex]} dk
+                      </Text>
+                    </View>
                   </View>
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={styles.fareLabel}>Yolculuk süresi</Text>
-                    <Text style={styles.fareValue}>
-                      {cumMinutes[alightIndex]} dk
+                </SectionCard>
+
+                {/* NFC açık: "İn" butonu yok, okutma beklenir */}
+                {nfcOn && (
+                  <NfcPrompt
+                    state={scanState}
+                    error={scanError ?? undefined}
+                    onRetry={retryAlightScan}
+                  />
+                )}
+
+                {/* NFC kapalı: okutma yok, kullanıcı listeden seçilir */}
+                {!nfcOn && (
+                  <SectionCard>
+                    <SectionTitle>İnen kullanıcı</SectionTitle>
+                    <UserPicker
+                      users={app.users}
+                      onSelect={(user) => finishAlight(alightIndex, user)}
+                    />
+                    <Text style={styles.fareNote}>
+                      Kullanıcıya dokunduğunuzda iniş tamamlanır ve ücret
+                      bakiyesinden düşülür.
                     </Text>
-                  </View>
-                </View>
-              </SectionCard>
+                  </SectionCard>
+                )}
+              </>
             )}
 
-            <PrimaryButton label="İn ve Yolculuğu Bitir" onPress={handleAlight} />
+            {alightIndex === null && (
+              <Text style={styles.alightHint}>
+                {nfcOn
+                  ? "İnmek için önce durağınızı seçin, ardından kartınızı okutun."
+                  : "İnmek için önce durağınızı seçin."}
+              </Text>
+            )}
           </>
         )}
       </ScrollView>
@@ -384,6 +463,20 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: colors.navy900,
     marginTop: 2,
+  },
+  fareNote: {
+    fontSize: 12.5,
+    color: colors.ink3,
+    lineHeight: 17,
+    marginTop: 10,
+    marginBottom: 2,
+  },
+  alightHint: {
+    textAlign: "center",
+    color: colors.ink3,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
   },
   tripBanner: {
     backgroundColor: colors.navy900,

@@ -96,7 +96,14 @@ function TripRow({ record }: { record: TripRecord }) {
           {record.cardType === "tam" ? "Tam" : "Öğrenci"} ·{" "}
           {maskCardNo(record.cardNo)}
         </Text>
-        <Text style={styles.fare}>{formatTL(record.fare)}</Text>
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={styles.fare}>{formatTL(record.fare)}</Text>
+          {record.balanceAfter !== undefined && (
+            <Text style={styles.balanceAfter}>
+              Kalan {formatTL(record.balanceAfter)}
+            </Text>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -160,4 +167,10 @@ const styles = StyleSheet.create({
   },
   card: { fontSize: 12.5, color: colors.ink3, fontWeight: "600" },
   fare: { fontSize: 14, fontWeight: "800", color: colors.ink },
+  balanceAfter: {
+    fontSize: 11.5,
+    color: colors.ink3,
+    fontWeight: "600",
+    marginTop: 2,
+  },
 });

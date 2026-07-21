@@ -3,12 +3,11 @@ import React, { useState } from "react";
 import {
   Platform,
   Pressable,
-  SafeAreaView,
-  StatusBar as RNStatusBar,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AppProvider, useApp } from "./src/context/AppContext";
 import { colors } from "./src/theme";
 import TripScreen from "./src/screens/TripScreen";
@@ -20,7 +19,7 @@ type TabKey = "trip" | "card" | "history" | "settings";
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "trip", label: "Yolculuk", icon: "🚌" },
-  { key: "card", label: "Kartım", icon: "💳" },
+  { key: "card", label: "Kart", icon: "💳" },
   { key: "history", label: "Geçmiş", icon: "🕓" },
   { key: "settings", label: "Ayarlar", icon: "⚙️" },
 ];
@@ -83,20 +82,22 @@ function Shell() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <SafeAreaView style={styles.safe}>
-        <StatusBar style="light" />
-        <Shell />
-      </SafeAreaView>
-    </AppProvider>
+    <SafeAreaProvider>
+      <AppProvider>
+        <SafeAreaView style={styles.safe}>
+          <StatusBar style="light" />
+          <Shell />
+        </SafeAreaView>
+      </AppProvider>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  // Güvenli alan boşluğunu SafeAreaView kendisi verir — elle status bar payı eklenmez
   safe: {
     flex: 1,
     backgroundColor: colors.navy900,
-    paddingTop: Platform.OS === "android" ? RNStatusBar.currentHeight : 0,
   },
   shell: { flex: 1, backgroundColor: colors.surface },
   splash: {
