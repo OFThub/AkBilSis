@@ -16,7 +16,6 @@ from app.core import (
     create_access_token,
     create_card_token,
     create_refresh_token,
-    decode_card_token,
     decode_refresh_token,
     generate_api_key,
     hash_api_key,
@@ -36,15 +35,36 @@ from app.repositories import (
     TripRepository,
 )
 from app.schemas import (
+    AnalyticsOverview,
+    BusLive,
     BusOccupancy,
     BusOccupancyDetail,
+    CardTypeShare,
     HourlyBoarding,
+    LineAnalytics,
     LineLiveStatus,
     OccupancyPassenger,
+    RecentTrip,
     StatsSummary,
+    StopAnalytics,
     StopBoarding,
+    StopPair,
     ValidateResponse,
 )
+from app.simulation import (
+    bus_position,
+    load_level,
+    peak_hours,
+    stop_schedule,
+    terminus_moment,
+)
+
+#: Kart tipinin arayüzde görünen adı — web ve mobil aynı etiketi kullanır
+CARD_TYPE_LABELS = {
+    CardType.NORMAL: "Tam",
+    CardType.STUDENT: "Öğrenci",
+    CardType.SENIOR: "65+",
+}
 
 
 def _now() -> datetime:
@@ -177,6 +197,15 @@ class CardService:
         self.db.refresh(card)
         return card
 
+    def set_type(self, card_id: uuid.UUID, card_type: CardType) -> Card:
+        """Tam/öğrenci statüsü. Süregelen yolculuklar etkilenmez: tip yolculuk
+        açılırken `card_type_snapshot` olarak damgalanır."""
+        card = self.cards.get_or_fail(card_id)
+        card.card_type = card_type
+        self.db.commit()
+        self.db.refresh(card)
+        return card
+
 
 class DeviceService:
     def __init__(self, db: Session):
@@ -230,16 +259,76 @@ class TransitService:
         self.trips = TripRepository(db)
 
     def list_lines(self, skip: int = 0, limit: int = 100):
-        return self.lines.list(skip, limit)
+        lines = self.lines.list(skip, limit)
+        for line in lines:
+            self._attach_peaks(line)
+        return lines
 
     def get_line(self, line_id: uuid.UUID) -> Line:
         line = self.lines.get_with_stops(line_id)
         if line is None:
             raise NotFoundError("Hat bulunamadı")
+        self._attach_peaks(line)
         return line
+
+    @staticmethod
+    def _attach_peaks(line: Line) -> None:
+        """Tepe saatleri şemaya taşınabilsin diye ORM nesnesine iliştirir.
+
+        Kalıcı bir alan değil: profil değiştiğinde tepe saat de değişsin diye
+        her okumada yeniden hesaplanır.
+        """
+        line.peak_hours = peak_hours(line.hourly_profile or [])
 
     def search_stops(self, term: str):
         return self.stops.search(term)
+
+    def _schedule(self, line_id: uuid.UUID, direction: Direction) -> tuple[list, list[int]]:
+        """Hattın sıralı durakları ve varış tarifesi."""
+        entries = list(self.line_stops.list_ordered(line_id, direction))
+        gaps = [e.minutes_from_previous or 0 for e in entries[1:]]
+        return entries, stop_schedule(gaps)
+
+    def live_buses(self, line_id: uuid.UUID) -> list[BusLive]:
+        """Hattın canlı araç konumları — tek doğruluk kaynağı simulation.py.
+
+        Araç sırası plakaya göre sabittir; `ValidationService._locate` aynı
+        sıralamayı kullanır, böylece "listede gördüğüm araç" ile "kart bastığım
+        araç" aynı konumda olur.
+        """
+        self.lines.get_or_fail(line_id)
+        buses = sorted(self.buses.list_by_line(line_id), key=lambda b: b.plate)
+        if not buses:
+            return []
+
+        occupancy = self.trips.count_open_by_bus()
+        now = _now()
+        # Tarife yöne göre değişir; her yön için bir kez okunup paylaşılır
+        schedules: dict[Direction, tuple[list, list[int]]] = {}
+
+        result: list[BusLive] = []
+        for index, bus in enumerate(buses):
+            if bus.direction not in schedules:
+                schedules[bus.direction] = self._schedule(line_id, bus.direction)
+            entries, arrival = schedules[bus.direction]
+            if not entries:
+                continue
+
+            pos = bus_position(index, arrival, now)
+            result.append(
+                BusLive(
+                    id=bus.id,
+                    plate=bus.plate,
+                    line_id=bus.line_id,
+                    at_stop=pos.at_stop,
+                    layover=pos.layover,
+                    current_stop=entries[pos.from_index].stop,
+                    next_stop=entries[pos.to_index].stop,
+                    minutes_to_next=pos.minutes_to_next,
+                    passenger_count=occupancy.get(bus.id, 0),
+                )
+            )
+        return result
 
     def list_buses(self, line_id: uuid.UUID):
         return self.buses.list_by_line(line_id)
@@ -320,22 +409,58 @@ class ValidationService:
             raise ForbiddenError("Hesabınıza bağlı aktif kart yok")
         return active[0]
 
-    def _resolve_stop(self, bus: Bus, stop_id: uuid.UUID) -> Stop:
-        entry = self.line_stops.get_entry(bus.line_id, bus.direction, stop_id)
-        if entry is None:
-            raise ConflictError("Durak bu hattın güzergâhında değil")
-        return entry.stop
+    def _locate(self, bus: Bus, now: datetime) -> tuple[Stop, Stop, float]:
+        """Aracın o an durduğu durak, son durak ve son durağa kalan sim-dakika.
 
-    def validate(
-        self, passenger: Passenger, bus_id: uuid.UUID, stop_id: uuid.UUID
-    ) -> ValidateResponse:
+        Durak istemciden gelmez: "yalnızca durakta binilir/inilir" kuralı
+        burada, sunucuda zorlanır — istemci konumu taklit edemez.
+        """
+        entries = list(self.line_stops.list_ordered(bus.line_id, bus.direction))
+        if not entries:
+            raise ConflictError("Hattın güzergâhı tanımlı değil")
+
+        gaps = [e.minutes_from_previous or 0 for e in entries[1:]]
+        buses = sorted(self.buses.list_by_line(bus.line_id), key=lambda b: b.plate)
+        index = next((i for i, b in enumerate(buses) if b.id == bus.id), 0)
+
+        pos = bus_position(index, stop_schedule(gaps), now)
+
+        if pos.layover:
+            raise ConflictError("Bu araç son durakta sefer bekliyor — yoldaki bir araç seçin")
+        if not pos.at_stop:
+            raise ConflictError(
+                f"Otobüs duraklar arasında. {entries[pos.to_index].stop.name} "
+                "durağına varınca işlem yapabilirsiniz"
+            )
+
+        return entries[pos.from_index].stop, entries[-1].stop, pos.minutes_to_terminus
+
+    def _open_trip(
+        self, card: Card, bus: Bus, stop: Stop, terminus: Stop, minutes_left: float, now: datetime
+    ) -> Trip:
+        trip = Trip(
+            card_id=card.id,
+            bus_id=bus.id,
+            line_id=bus.line_id,
+            board_stop_id=stop.id,
+            boarded_at=now,
+            status=TripStatus.OPEN,
+            card_type_snapshot=card.card_type,
+            # Yolcu inmezse son durakta otomatik indirilir; an burada damgalanır
+            auto_alight_at=terminus_moment(now, minutes_left),
+            auto_alight_stop_id=terminus.id,
+        )
+        self.trips.add(trip)
+        return trip
+
+    def validate(self, passenger: Passenger, bus_id: uuid.UUID) -> ValidateResponse:
         bus = self.buses.get_or_fail(bus_id)
         if not bus.is_active:
             raise ConflictError("Otobüs pasif durumda")
 
         card = self._resolve_card(passenger)
-        stop = self._resolve_stop(bus, stop_id)
         now = _now()
+        stop, terminus, minutes_left = self._locate(bus, now)
 
         bus.current_stop_id = stop.id
         bus.location_updated_at = now
@@ -343,30 +468,13 @@ class ValidationService:
         open_trip = self.trips.get_open_by_card(card.id)
 
         if open_trip is None:
-            trip = Trip(
-                card_id=card.id,
-                bus_id=bus.id,
-                line_id=bus.line_id,
-                board_stop_id=stop.id,
-                boarded_at=now,
-                status=TripStatus.OPEN,
-                card_type_snapshot=card.card_type,
-            )
-            self.trips.add(trip)
+            trip = self._open_trip(card, bus, stop, terminus, minutes_left, now)
             action = "boarded"
         elif open_trip.bus_id != bus.id:
+            # Başka araca binildi: önceki yolculuk kapanmadan bırakıldı sayılır
             open_trip.status = TripStatus.ABANDONED
             open_trip.alighted_at = now
-            trip = Trip(
-                card_id=card.id,
-                bus_id=bus.id,
-                line_id=bus.line_id,
-                board_stop_id=stop.id,
-                boarded_at=now,
-                status=TripStatus.OPEN,
-                card_type_snapshot=card.card_type,
-            )
-            self.trips.add(trip)
+            trip = self._open_trip(card, bus, stop, terminus, minutes_left, now)
             action = "boarded"
         elif open_trip.board_stop_id == stop.id:
             raise ConflictError("İniş, biniş durağında yapılamaz")
@@ -397,6 +505,8 @@ class TripService:
         self.cards = CardRepository(db)
 
     def history(self, passenger: Passenger, skip: int = 0, limit: int = 50):
+        # Arkaplan görevi gecikse bile yolcu tutarlı bir liste görsün
+        self.close_due()
         cards = self.cards.list_by_passenger(passenger.id)
         result: list[Trip] = []
         for card in cards:
@@ -404,11 +514,30 @@ class TripService:
         return sorted(result, key=lambda t: t.boarded_at, reverse=True)[:limit]
 
     def active(self, passenger: Passenger) -> Trip | None:
+        # Vakti gelmiş yolculuk "hâlâ araçtasınız" diye görünmesin
+        self.close_due()
         for card in self.cards.list_by_passenger(passenger.id):
             trip = self.trips.get_open_by_card(card.id)
             if trip:
                 return trip
         return None
+
+    def close_due(self) -> int:
+        """Son durakta otomatik iniş.
+
+        Yolcu inmeyi unutursa aracın son durağa vardığı anda yolculuk kapanır
+        ve geçmişe normal, tamamlanmış bir kayıt olarak yazılır. Aracın anlık
+        konumuna bakılmaz — binişte saklanan damgaya bakılır, çünkü konum duvar
+        saatinden döngüsel türetilir ve geçmiş bir turu ıskalayabilir.
+        """
+        due = self.trips.list_due(_now())
+        for trip in due:
+            trip.alight_stop_id = trip.auto_alight_stop_id
+            trip.alighted_at = trip.auto_alight_at
+            trip.status = TripStatus.COMPLETED
+        if due:
+            self.db.commit()
+        return len(due)
 
     def close_stale(self) -> int:
         cutoff = _now() - timedelta(minutes=settings.trip_auto_close_minutes)
@@ -437,6 +566,7 @@ class StatsService:
         self.db = db
         self.trips = TripRepository(db)
         self.buses = BusRepository(db)
+        self.lines = LineRepository(db)
 
     def occupancy(self) -> list[BusOccupancy]:
         counts = self.trips.count_open_by_bus()
@@ -491,3 +621,139 @@ class StatsService:
                 for sid, name, count in self.trips.top_board_stops()
             ],
         )
+
+    # ── Yönetim analitiği ────────────────────────────────────────────────────
+
+    def overview(self) -> AnalyticsOverview:
+        counts = self.trips.count_by_status()
+        hourly = self.trips.hourly_boardings()
+        busiest = max(hourly, key=lambda row: row[1])[0] if hourly else None
+        open_trips = counts.get(TripStatus.OPEN.value, 0)
+
+        return AnalyticsOverview(
+            total_trips=sum(counts.values()),
+            open_trips=open_trips,
+            completed_trips=counts.get(TripStatus.COMPLETED.value, 0),
+            abandoned_trips=counts.get(TripStatus.ABANDONED.value, 0),
+            active_buses=len(self.buses.list_active()),
+            onboard_passengers=open_trips,
+            busiest_hour=busiest,
+            # Grafikte boş saatler de görünsün diye 24 saat tam doldurulur
+            hourly=[
+                HourlyBoarding(hour=h, count=dict(hourly).get(h, 0)) for h in range(24)
+            ],
+        )
+
+    def line_analytics(self) -> list[LineAnalytics]:
+        """Hat başına yoğunluk + sefer önerisi.
+
+        Karar ölçütü: **zirve saatte araç başına düşen yolcu**. Toplam yolculuk
+        tek başına yanıltıcıdır — üç araçla taşınan 90 yolcu rahat, tek araçla
+        taşınan 40 yolcu sıkışıktır.
+        """
+        by_line_hour = self.trips.hourly_by_line()
+        totals = self.trips.count_by_line()
+
+        peaks: dict[uuid.UUID, tuple[int, int]] = {}
+        for line_id, hour, count in by_line_hour:
+            if line_id not in peaks or count > peaks[line_id][1]:
+                peaks[line_id] = (hour, count)
+
+        bus_counts: dict[uuid.UUID, int] = {}
+        for bus in self.buses.list_active():
+            bus_counts[bus.line_id] = bus_counts.get(bus.line_id, 0) + 1
+
+        capacity = max(1, settings.bus_capacity)
+        result: list[LineAnalytics] = []
+
+        for line in self.lines.list(limit=200):
+            peak_hour, peak_trips = peaks.get(line.id, (None, 0))
+            active = bus_counts.get(line.id, 0)
+            per_bus = peak_trips / active if active else float(peak_trips)
+            level = load_level(per_bus / capacity, 0.40, 0.75)
+
+            result.append(
+                LineAnalytics(
+                    line_id=line.id,
+                    code=line.code,
+                    name=line.name,
+                    total_trips=totals.get(line.id, 0),
+                    peak_hour=peak_hour,
+                    peak_hour_trips=peak_trips,
+                    active_buses=active,
+                    peak_per_bus=round(per_bus, 1),
+                    load_level=level,
+                    recommendation={
+                        "high": "Zirve saatte araçlar doluyor — sefer artırılmalı",
+                        "low": "Araçlar boş gidiyor — sefer azaltılabilir",
+                        "normal": "Sefer sayısı yeterli",
+                    }[level],
+                )
+            )
+
+        result.sort(key=lambda item: item.peak_per_bus, reverse=True)
+        return result
+
+    def stop_analytics(self) -> list[StopAnalytics]:
+        """Durak yoğunluğu — en yoğun durağa göre oranlanıp renklendirilir."""
+        rows = self.trips.stop_usage()
+        if not rows:
+            return []
+
+        busiest = max(board + alight for _, _, board, alight in rows) or 1
+
+        return [
+            StopAnalytics(
+                stop_id=stop_id,
+                name=name,
+                boardings=board,
+                alightings=alight,
+                total=board + alight,
+                load_level=load_level((board + alight) / busiest, 0.35, 0.70),
+            )
+            for stop_id, name, board, alight in rows
+        ]
+
+    def stop_pairs(self) -> list[StopPair]:
+        return [
+            StopPair(board_stop=a, alight_stop=b, count=count)
+            for a, b, count in self.trips.top_pairs()
+        ]
+
+    def card_type_shares(self) -> list[CardTypeShare]:
+        counts = self.trips.count_by_card_type()
+        return [
+            CardTypeShare(
+                card_type=card_type,
+                label=CARD_TYPE_LABELS[card_type],
+                count=counts.get(card_type.value, 0),
+            )
+            for card_type in CardType
+        ]
+
+    def recent_trips(self, limit: int = 20) -> list[RecentTrip]:
+        result: list[RecentTrip] = []
+        for trip in self.trips.recent(limit):
+            duration = None
+            if trip.alighted_at:
+                duration = max(
+                    1, round((trip.alighted_at - trip.boarded_at).total_seconds() / 60)
+                )
+
+            result.append(
+                RecentTrip(
+                    id=trip.id,
+                    passenger_name=trip.card.passenger.full_name if trip.card.passenger else None,
+                    card_type=trip.card_type_snapshot,
+                    line_code=trip.line.code,
+                    line_name=trip.line.name,
+                    bus_plate=trip.bus.plate,
+                    board_stop=trip.board_stop.name,
+                    alight_stop=trip.alight_stop.name if trip.alight_stop else None,
+                    boarded_at=trip.boarded_at,
+                    alighted_at=trip.alighted_at,
+                    duration_min=duration,
+                    status=trip.status,
+                )
+            )
+        return result

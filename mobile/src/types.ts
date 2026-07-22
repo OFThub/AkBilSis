@@ -1,85 +1,114 @@
-export type CardType = "tam" | "ogrenci";
-
 /**
- * Kayıtlı kullanıcı = sanal akbil kartının sahibi. Kart kimliği burada yaşar;
- * kullanıcı kayıtlı listeden seçilerek doğrulanır. Ücret/bakiye kavramı
- * yoktur: tam ve öğrenci yalnızca statü farkıdır, hiçbir yerde para geçmez.
+ * Backend sözleşmesinin mobil karşılığı.
+ *
+ * Hat, durak, otobüs ve yolculuk verisi yalnızca sunucudan gelir — uygulamada
+ * kopyası tutulmaz. Ücret/bakiye kavramı yoktur: tam ve öğrenci yalnızca statü
+ * farkıdır, hiçbir yerde para geçmez.
  */
-export interface CardUser {
+
+export type CardType = "normal" | "student" | "senior";
+export type CardMedium = "physical" | "mobile";
+export type TripStatus = "open" | "completed" | "abandoned";
+
+export interface Passenger {
+  id: string;
+  full_name: string;
+  email: string;
+  is_admin: boolean;
+  created_at: string;
+}
+
+export interface Card {
+  id: string;
+  nfc_uid: string | null;
+  medium: CardMedium;
+  card_type: CardType;
+  is_active: boolean;
+  passenger_id: string | null;
+  created_at: string;
+}
+
+export interface Stop {
   id: string;
   name: string;
-  cardNo: string;
-  cardType: CardType;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+export interface LineStop {
+  sequence: number;
+  direction: "forward" | "backward";
+  minutes_from_previous: number | null;
+  stop: Stop;
+}
+
+export interface Line {
+  id: string;
+  code: string;
+  name: string;
+  is_active: boolean;
+  /** Saat başına beklenen yoğunluk (24 eleman) */
+  hourly_profile: number[];
+  /** hourly_profile'dan sunucuda türetilen tepe saatler */
+  peak_hours: number[];
+}
+
+export interface LineDetail extends Line {
+  line_stops: LineStop[];
 }
 
 /**
- * Devam eden yolculuk. Kişiye bağlıdır: bir kullanıcının aynı anda en çok bir
- * aktif yolculuğu olabilir, inmeden başka araca binemez. Farklı kullanıcılar
- * aynı anda yolculuk yapabilir.
+ * Aracın canlı konumu. Konum sunucuda, duvar saatinden deterministik
+ * hesaplanır; telefon kendi hesabını yapmaz.
  */
-export interface ActiveTrip {
-  /** Yolculuğun sahibi — listeden seçilerek doğrulanan kullanıcı */
-  userId: string;
-  /** Binişte açılan geçmiş kaydı (TripRecord.localId) — inişte aynı kayıt tamamlanır */
-  recordId: string;
-  lineId: string;
-  /** Binilen aracın simülasyondaki kimliği (ör. "448-2") */
-  busId: string;
-  /** Plaka kayıtta ve arayüzde gösterilir — araç kimliği okunaklı olsun diye */
-  busPlate: string;
-  /** Binişin yapıldığı durak — araç o an bu durakta beklemekteydi */
-  boardingStopIndex: number;
-  boardTime: string; // ISO 8601 — kayda yazılan saat (demo modunda kaydırılmış olabilir)
-  /** Kaydırılmamış gerçek biniş anı — yolculuk süresi buradan ölçülür */
-  boardRealTime: string; // ISO 8601
-  /**
-   * Aracın son durağa varacağı **gerçek** an. Yolcu inmezse bu anda otomatik
-   * indirilir. Biniş anında tarifeden hesaplanıp saklanır: araç konumu duvar
-   * saatinden döngüsel türetildiği için "araç şu an son durakta mı" sorusu
-   * uygulama kapalıyken geçen turu ıskalar, damga ıskalamaz.
-   */
-  terminusRealTime: string; // ISO 8601
+export interface LiveBus {
+  id: string;
+  plate: string;
+  line_id: string;
+  /** Durakta bekliyor — biniş ve iniş yalnızca bu sırada yapılabilir */
+  at_stop: boolean;
+  /** Son durakta sefer bekliyor — yolcu alınmaz */
+  layover: boolean;
+  current_stop: Stop | null;
+  next_stop: Stop | null;
+  minutes_to_next: number;
+  passenger_count: number;
 }
 
-/**
- * Yolculuk kaydı. Biniş anında oluşturulur ("onboard") — yolcunun o an araçta
- * olduğu buradan bilinir ve araçların doluluğu bu kayıtlardan hesaplanır.
- * İniş yapılınca aynı kayıt tamamlanır ve sunucuya gönderilir.
- */
-export interface TripRecord {
-  localId: string;
-  cardNo: string;
-  cardType: CardType;
-  line: string;
-  boardingStop: string;
-  boardTime: string; // ISO 8601
-  /** Yolcu hâlâ araçtayken null — iniş yapılınca dolar */
-  alightingStop: string | null;
-  alightTime: string | null; // ISO 8601
-  durationMin: number | null;
-  /** Yalnızca uygulama içi gösterim — sunucuya gönderilmez */
-  busPlate: string;
-  /** onboard: yolcu araçta · pending: indi, gönderilemedi · sent: sunucuda */
-  status: "onboard" | "pending" | "sent";
+export interface Trip {
+  id: string;
+  /** Yolculuğun yapıldığı araç — süren yolculukta iniş bu araca yapılır */
+  bus_id: string;
+  line: Line;
+  board_stop: Stop;
+  alight_stop: Stop | null;
+  boarded_at: string;
+  alighted_at: string | null;
+  status: TripStatus;
 }
 
-/** İnişi tamamlanmış kayıt — sunucuya yalnızca bunlar gönderilebilir */
-export type CompletedTrip = TripRecord & {
-  alightingStop: string;
-  alightTime: string;
-  durationMin: number;
-};
-
-export function isCompleted(record: TripRecord): record is CompletedTrip {
-  return (
-    record.alightingStop !== null &&
-    record.alightTime !== null &&
-    record.durationMin !== null
-  );
+export interface Favorite {
+  id: string;
+  line_id: string;
+  line: Line;
+  created_at: string;
 }
 
+/** Kart bas sonucu — biniş mi iniş mi olduğunu sunucu söyler */
+export interface ValidateResult {
+  action: "boarded" | "alighted";
+  trip_id: string;
+  passenger_name: string | null;
+  line_code: string;
+  stop_name: string;
+  occurred_at: string;
+}
+
+export type ThemeMode = "light" | "dark";
+export type Language = "tr" | "en";
+
+/** Ayarlar tamamen yereldir — hiçbiri sunucuya gönderilmez. */
 export interface Settings {
-  // İzleme merkezi adresi ayarlarda değil, gizli .env dosyasındadır (config/env.ts)
-  demoMode: boolean; // biniş saatini elle seçme (grafik demoları için)
-  demoHour: number; // 0-23
+  theme: ThemeMode;
+  language: Language;
 }

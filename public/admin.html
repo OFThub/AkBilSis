@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Akbil İzleme Merkezi — Yönetim</title>
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <img src="assets/logo-2.png" alt="Arnavutköy Belediyesi" class="brand-logo" />
+      <div class="brand-text">
+        <h1>Akbil İzleme Merkezi</h1>
+        <p>Mobil uygulamadan gelen seyahat analizleri</p>
+      </div>
+      <nav class="topnav">
+        <a href="panel.html">Hesabım</a>
+        <a href="/admin" class="is-current">Yönetim</a>
+      </nav>
+      <div class="session-block">
+        <span id="sessionName" class="session-name">…</span>
+        <span id="clock" class="clock">--:--</span>
+        <button id="logoutBtn" class="ghost-btn" type="button">Çıkış</button>
+      </div>
+    </div>
+    <div class="route-ribbon" aria-hidden="true"></div>
+  </header>
+
+  <main class="container">
+    <section class="tiles" aria-label="Özet göstergeler">
+      <div class="tile">
+        <span class="tile-label">Toplam yolculuk</span>
+        <span class="tile-value" id="tileTrips">0</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Şu an araçta</span>
+        <span class="tile-value" id="tileOnboard">0</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Aktif otobüs</span>
+        <span class="tile-value" id="tileBuses">0</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">En yoğun saat</span>
+        <span class="tile-value" id="tileBusyHour">—</span>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card wide">
+        <h2>Saatlik yoğunluk</h2>
+        <p class="card-sub">Gün içinde hangi saatte kaç biniş yapıldı</p>
+        <div class="chart-box"><canvas id="hourlyChart" role="img" aria-label="Saat başına biniş sayısı çubuk grafiği"></canvas></div>
+      </article>
+
+      <article class="card wide">
+        <h2>Hat yoğunluğu ve sefer önerisi</h2>
+        <p class="card-sub">
+          Ölçüt: hattın en yoğun saatinde <strong>araç başına düşen yolcu</strong>.
+          Kırmızı hatlarda sefer artırılmalı, yeşil hatlarda azaltılabilir.
+        </p>
+        <div id="lineCards" class="line-cards"></div>
+        <p id="lineEmpty" class="empty" hidden>
+          Henüz yolculuk kaydı yok — mobil uygulamadan biniş yapıldığında
+          buradaki değerlendirme oluşur.
+        </p>
+      </article>
+
+      <article class="card">
+        <h2>En yoğun duraklar</h2>
+        <p class="card-sub">Biniş + iniş toplamı; renk en yoğun durağa göredir</p>
+        <div class="chart-box"><canvas id="stopsChart" role="img" aria-label="Durak başına kullanım çubuk grafiği"></canvas></div>
+        <div id="stopLegend" class="load-legend"></div>
+      </article>
+
+      <article class="card">
+        <h2>Tam / öğrenci dağılımı</h2>
+        <p class="card-sub">Yolculuk anındaki kart statüsüne göre</p>
+        <div class="chart-box donut"><canvas id="cardTypeChart" role="img" aria-label="Kart tipi dağılımı halka grafiği"></canvas></div>
+      </article>
+
+      <article class="card wide">
+        <h2>En yoğun güzergâhlar</h2>
+        <p class="card-sub">Hangi duraklar arasında en çok yolculuk yapılıyor</p>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Biniş</th><th>İniş</th><th>Yolculuk</th></tr>
+            </thead>
+            <tbody id="pairBody"></tbody>
+          </table>
+          <p id="pairEmpty" class="empty" hidden>
+            Tamamlanmış yolculuk yok. Güzergâh ancak iniş yapıldığında oluşur.
+          </p>
+        </div>
+      </article>
+
+      <article class="card feed">
+        <h2>Son yapılan yolculuklar</h2>
+        <p class="card-sub">15 saniyede bir yenilenir</p>
+        <div class="table-wrap">
+          <table id="tripTable">
+            <thead>
+              <tr>
+                <th>Saat</th>
+                <th>Yolcu</th>
+                <th>Hat</th>
+                <th>Güzergâh</th>
+                <th>Süre</th>
+                <th>Kart</th>
+              </tr>
+            </thead>
+            <tbody id="tripBody"></tbody>
+          </table>
+          <p id="tripEmpty" class="empty" hidden>
+            Henüz kayıt yok. Mobil uygulamadan ilk yolculuk yapıldığında burada
+            görünür.
+          </p>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Arnavutköy Belediyesi — Akbil İzleme Merkezi</span>
+    <span id="refreshedAt" class="footer-note">—</span>
+  </footer>
+
+  <script src="vendor/chart.umd.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

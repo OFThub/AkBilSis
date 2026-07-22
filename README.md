@@ -1,120 +1,146 @@
 # Arnavutköy Belediyesi — Akbil Simülasyon Projesi
 
-İki bölümden oluşur:
+Üç parçadan oluşur ve **tek doğruluk kaynağı backend'dir**: hat, durak, otobüs
+konumu, yolculuk ve favori verisi yalnızca sunucuda yaşar; istemciler bunları
+hesaplamaz, yalnızca gösterir.
 
 | Klasör | Ne yapar |
 |---|---|
-| `backend/` | Mobilden gelen yolculuk kayıtlarını alır ve **Akbil İzleme Merkezi** panelinde grafiklerle gösterir (Node.js + Express, bellek içi — veritabanı yok, ileride eklenecek) |
-| `mobile/` | Akbil basmayı simüle eden mobil uygulama (Expo / React Native, TypeScript) |
+| `backend/` | FastAPI + PostgreSQL. Kimlik doğrulama, otobüs simülasyonu, yolculuk kayıtları ve yönetim analitiği. Web sitesini de bu süreç servis eder. |
+| `public/` | Web sitesi (saf HTML/CSS/JS). Giriş/kayıt, yolcu paneli ve yönetici analiz paneli. Derleme adımı yoktur. |
+| `mobile/` | Akbil basmayı simüle eden mobil uygulama (Expo / React Native, TypeScript). Giriş zorunludur. |
 
 ## Sistem mimarisi
 
-Üç parçalı, tek süreçli ve bilinçli olarak veritabanısız bir mimari:
-
 ```mermaid
 flowchart LR
-    subgraph Telefon["📱 Mobil uygulama (Expo / RN)"]
-        UI[TripScreen<br/>biniş & iniş] --> CTX[AppContext<br/>kart + geçmiş durumu]
-        CTX <--> AS[(AsyncStorage<br/>kalıcı yerel durum)]
-        CTX --> API[api/client.ts]
+    subgraph Telefon["📱 Mobil (Expo / RN)"]
+        AUTH[AuthScreen<br/>giriş / kayıt] --> CTX[AppContext<br/>oturum + yerel ayarlar]
+        CTX --> MAPI[api/client.ts<br/>Bearer + refresh]
     end
 
-    subgraph Sunucu["🖥️ backend/server.js (Express, :4000)"]
-        TRIPS[["trips[] — bellek içi kayıtlar"]]
-        SSE[["sseClients — açık SSE bağlantıları"]]
+    subgraph Tarayici["🖥️ Web (public/)"]
+        LOGIN[index.html] --> PANEL[panel.html<br/>kart + hat yoğunlukları]
+        PANEL -.admin ise.-> ADMIN[admin.html<br/>analizler]
+        WAPI[js/api.js<br/>httpOnly çerez]
     end
 
-    subgraph Panel["📊 Akbil İzleme Merkezi (tarayıcı)"]
-        APP[public/app.js<br/>Chart.js grafikleri]
+    subgraph Sunucu["⚙️ backend/ — FastAPI :8000"]
+        ROUTES[routes.py] --> SERVICES[services.py]
+        SERVICES --> REPOS[repositories.py]
+        REPOS --> DB[(PostgreSQL)]
+        SIM[["simulation.py<br/>otobüs konumu<br/>(duvar saatinden)"]] --> SERVICES
     end
 
-    API -- "POST /api/trips (iniş anında)" --> TRIPS
-    TRIPS -- "broadcast('trip')" --> SSE
-    SSE -- "SSE: anlık olay akışı<br/>GET /api/events" --> APP
-    APP -- "yedek: 15 sn'de bir<br/>GET /api/stats + /api/trips" --> Sunucu
+    MAPI -- "POST /validate {bus_id}" --> ROUTES
+    WAPI -- "GET /admin/analytics/*" --> ROUTES
+    ROUTES -- "StaticFiles" --> Tarayici
 ```
 
-### Veri akışı — bir yolculuğun hayatı
+### Bir yolculuğun hayatı
 
-1. **Biniş (Kart Bas):** `AppContext.board()` bakiye ve aktif yolculuk kontrolü yapar,
-   ücreti düşer, `activeTrip` oluşturur. Bu aşamada sunucuya hiçbir şey gitmez.
-2. **İniş (İn ve Yolculuğu Bitir):** `AppContext.alight()` süreyi durak matrisi
-   (`data/lines.ts`) üzerinden hesaplar, kaydı **önce yerel geçmişe** `pending`
-   durumuyla yazar, sonra `postTrip()` ile `POST /api/trips` dener.
-3. **Sunucu:** kaydı doğrular, `trips[]` dizisine ekler, `id` ve `receivedAt` damgalar
-   ve **aynı anda** tüm açık SSE bağlantılarına `trip` olayını yayınlar.
-4. **Panel:** `EventSource("/api/events")` ile dinler; olay gelir gelmez grafikleri ve
-   "Son yolculuklar" tablosunu yeniler. SSE kopuksa 15 saniyelik yedek polling devreye
-   girer; bağlantı geri gelince `open` olayında kaçan kayıtlar toparlanır.
-5. **Hata yolu:** sunucuya ulaşılamazsa kayıt telefonda `pending` kalır, Geçmiş
-   ekranındaki "Tekrar gönder" (`retryPending()`) ile yeniden denenir — veri kaybolmaz.
+1. **Biniş:** Mobilde "Bin" → `POST /api/v1/validate {bus_id}`. Durak
+   **gönderilmez**: sunucu, aracın o anki konumundan belirler. Araç durakta
+   değilse istek 409 ile reddedilir — kural sunucuda zorlanır, istemci taklit
+   edemez.
+2. Sunucu `Trip` kaydını `OPEN` açar ve aracın son durağa varacağı anı
+   `auto_alight_at` olarak damgalar.
+3. **İniş:** Aynı uca ikinci kez basılır. Sunucu açık yolculuğu görür,
+   `COMPLETED` yapar. Kayıt **iniş anında** yazılır; telefon geçmiş göndermez.
+4. **İnilmezse:** `auto_alight_at` geçince arkaplan görevi
+   (`TripService.close_due`) yolculuğu son durakta kapatır. Uygulama kapalıyken
+   de doğru işler, çünkü an binişte hesaplanıp saklanmıştır.
+5. **Geçmiş:** `GET /api/v1/trips` yalnızca giriş yapan kullanıcının kayıtlarını
+   döndürür.
 
-### API sözleşmesi
+### Otobüs simülasyonu
+
+Araç konumu **duvar saatinden deterministik** hesaplanır (`app/simulation.py`);
+hiçbir durum saklanmaz, sunucu yeniden başlasa da aynı anda aynı sonucu verir.
+Tarife `LineStop.minutes_from_previous` alanından gelir.
+
+- Hat başına **3 araç**, sefer döngüsüne eşit aralıklarla dağıtılır.
+- Araç her durakta **3 sim-dakika** bekler (`SIM_SPEED=10` ile gerçek ~18 sn).
+  Biniş ve iniş yalnızca bu pencerede yapılabilir.
+- Son durakta **6 sim-dakika** mola verilir; bu sırada yolcu alınmaz.
+- `SIM_SPEED` çarpanı `.env` içindedir (10 → gerçek 30 sn ≈ 5 sim-dakika).
+
+### API sözleşmesi (`/api/v1`)
 
 | Uç nokta | Metod | Görev |
 |---|---|---|
-| `/api/trips` | POST | İniş kaydını al, doğrula, belleğe yaz, SSE ile yayınla |
-| `/api/trips?limit=N` | GET | Kayıtları **sunucuya geliş sırasına göre** (en yeni önce) döndür |
-| `/api/trips` | DELETE | Tüm kayıtları sıfırla, panellere `reset` olayı yayınla |
-| `/api/stats` | GET | Saatlik yoğunluk, hat/durak/kart tipi kırılımları, gelir toplamları |
-| `/api/events` | GET | SSE canlı akışı: `trip` ve `reset` olayları + 30 sn'de bir nabız |
-| `/api/health` | GET | Bağlantı testi (mobil Ayarlar ekranı kullanır) |
+| `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout` | POST | Kimlik. Login ayrıca httpOnly çerez basar (web için). |
+| `/passengers/me` | GET/PATCH | Oturum sahibinin bilgileri |
+| `/cards` | GET | Kullanıcının kartları |
+| `/transit/lines` | GET | Hatlar + `hourly_profile` + `peak_hours` |
+| `/transit/lines/{id}` | GET | Hat + sıralı duraklar |
+| `/transit/lines/{id}/buses` | GET | **Canlı araç konumları** |
+| `/favorites` | GET/POST/DELETE | Favori hatlar |
+| `/trips`, `/trips/active` | GET | Kullanıcının kendi yolculukları |
+| `/validate` | POST | Kart bas — biniş ya da iniş |
+| `/admin/analytics/*` | GET | overview · lines · stops · pairs · card-types |
+| `/admin/trips` | GET | Son yolculuklar |
+| `/health` | GET | Bağlantı testi |
 
-### Yolculuk kaydı (veri modeli)
+Kimlik iki yolla taşınır: **mobil** `Authorization: Bearer`, **web** httpOnly
+`akbil_access` çerezi. Doğrulama tektir (`deps.get_current_passenger`).
 
-| Alan | Tip | Açıklama |
-|---|---|---|
-| `id` | number | Sunucuda artan sıra no — geliş sırasını belirler |
-| `cardNo` | string | Kart numarası (panelde maskelenir) |
-| `cardType` | `"tam"` \| `"ogrenci"` | Ücret tarifesini belirler |
-| `line` | string | Hat adı (ör. "448 Arnavutköy – Mecidiyeköy") |
-| `boardingStop` / `alightingStop` | string | Biniş / iniş durağı |
-| `boardTime` / `alightTime` | ISO-8601 | Biniş / hesaplanan iniş zamanı |
-| `durationMin` | number | Duraklar arası sürelerin toplamı |
-| `fare` | number | Düşülen ücret (₺) |
-| `receivedAt` | ISO-8601 | Kaydın sunucuya ulaştığı an |
+### Yönetici koruması
 
-### Tasarım kararları
+`/admin` sayfası iki katmanla korunur:
 
-- **Veritabanı yok:** kayıtlar `trips[]` dizisinde tutulur; sunucu kapanınca silinir.
-  Simülasyonun amacı canlı akışı göstermek olduğundan kalıcılık bilinçli ertelendi;
-  mobil taraftaki `pending`/tekrar-gönder mekanizması geçici kesintileri zaten örter.
-- **SSE (WebSocket değil):** veri tek yönlü aktığı için (sunucu → panel) SSE yeterli;
-  ek bağımlılık gerektirmez, `EventSource` kopunca kendiliğinden yeniden bağlanır.
-- **Panelde çifte güvence:** anlık SSE + 15 sn yedek polling; sağ üstteki rozet
-  bağlantı durumunu gösterir ("Canlı" / "Bağlanıyor…").
-- **Tek doğruluk kaynakları:** ücretler ve hat/durak/süre verileri yalnızca
-  `mobile/src/data/lines.ts` içinde; kart durumu yalnızca telefonda (AsyncStorage).
-- **CORS açık (`*`):** mobil uygulama Expo üzerinden farklı origin'den istek atar.
+1. **Sayfa:** `GET /admin` FastAPI route'u çerezi doğrular. Yönetici değilse
+   HTML hiç üretilmez, `/` adresine yönlendirilir — adres çubuğuna elle yazmak
+   işe yaramaz.
+2. **Veri:** `/api/v1/admin/*` uçları `get_current_admin` ile 403 döner.
+
+Üst banttaki "Yönetim" bağlantısı yalnızca `is_admin` doğruysa basılır; bu
+sadece görsel kolaylıktır, güvenlik yukarıdaki iki katmandadır.
+
+### Yoğunluk renk kodu
+
+Yönetim panelindeki yeşil/sarı/kırmızı kararı **sunucuda** verilir
+(`load_level`), web yalnızca boyar. Renk tek başına anlam taşımasın diye her
+yerde metin etiketiyle birlikte gösterilir.
+
+- **Hat:** zirve saatteki biniş ÷ aktif otobüs, `BUS_CAPACITY`'ye oranla →
+  `<%40` yeşil *"sefer azaltılabilir"* · `%40–75` normal · `>%75` kırmızı
+  *"sefer artırılmalı"*.
+- **Durak:** kullanım ÷ en yoğun durağın kullanımı → `<%35` yeşil · `%35–70`
+  sarı · `>%70` kırmızı.
+
+İki yoğunluk kavramı bilinçle ayrıdır: yolcuya gösterilen `Line.hourly_profile`
+hattın **beklenen** profilidir (`lines.json`), yönetim analitiği ise **gerçek**
+`Trip` kayıtlarından hesaplanır.
 
 ## 1. Backend'i başlat
 
 ```powershell
 cd backend
-npm install        # ilk seferde
-npm start
+docker compose up -d          # PostgreSQL 16
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+copy .env.example .env        # SECRET_KEY ve CARD_TOKEN_SECRET değerlerini değiştirin
+alembic upgrade head
+python -m app.seed            # hat, durak ve otobüsleri yükler
+
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- Panel: <http://localhost:4000>
-- Açılışta konsolda **"Ağ (mobil): http://192.168.x.x:4000"** satırı görünür —
-  telefonla test ederken bu adres mobil uygulamanın **Ayarlar** ekranına girilir.
-- Panel yeni kayıtları **anında** gösterir (SSE canlı akış, `GET /api/events`);
-  bağlantı koparsa sağ üstteki rozet "Bağlanıyor…" olur ve 15 saniyede bir
-  yedek yenileme devreye girer. Grafikler: saatlik yoğunluk, hat kullanımı,
-  en çok kullanılan duraklar, tam/öğrenci dağılımı + son yolculuklar.
+- Web sitesi: <http://localhost:8000>
+- API dokümanı: <http://localhost:8000/docs>
+- `--host 0.0.0.0` telefonun bilgisayara ulaşabilmesi için gereklidir.
 
-Demo verisi doldurmak için (backend çalışırken, ikinci bir terminalde):
+Yönetici hesabı (kayıt ucu asla yönetici üretmez, tek yol budur):
 
 ```powershell
-cd backend
-npm run seed        # 60 rastgele yolculuk; sayı verilebilir: npm run seed 100
+python -m app.seed --admin admin@arnavutkoy.bel.tr Admin12345
 ```
 
-Panelin sağ altındaki **"Verileri temizle"** tüm kayıtları sıfırlar.
-
 ## 2. Mobil uygulamayı başlat
-
-VS Code terminalinde tek komut yeter — Android SDK, JDK ya da emülatör gerekmez:
 
 ```powershell
 cd mobile
@@ -122,48 +148,40 @@ npm install        # ilk seferde
 npm start
 ```
 
-- **Telefonda (önerilen)**: Terminalde çıkan QR kodu **Expo Go** ile okutun.
-  Telefon ve bilgisayar aynı Wi-Fi'da olmalı.
-- **Bilgisayarda hızlı deneme**: `npm run web` → tarayıcıda açılır.
+- **Telefonda (önerilen):** QR kodu **Expo Go** ile okutun. Telefon ve
+  bilgisayar aynı Wi-Fi'da olmalı.
+- **Bilgisayarda:** `npm run web`.
 
 Backend adresi arayüzden değil `mobile/.env` dosyasından okunur
 (`EXPO_PUBLIC_BACKEND_URL`). Telefondan test ederken **`localhost` yazmayın** —
-telefonda o adres telefonun kendisidir. Bilgisayarın ağ adresini yazın; backend
-açılışta bu adresi zaten ekrana basar. `.env` değişince Metro önbelleğini
-temizleyin: `npx expo start -c`.
+telefonda o adres telefonun kendisidir; bilgisayarın ağ adresini yazın.
+`.env` değişince Metro önbelleğini temizleyin: `npx expo start -c`.
 
-> Port 8081 doluysa Expo başka port sorar. Eskiden kalma bir Metro süreci
-> varsa kapatın ya da `npm start -- --port 8082` ile başlatın.
+> Wi-Fi'da istemci yalıtımı (AP isolation) açıksa telefon bilgisayara
+> ulaşamaz; yönlendirici ayarından kapatılmalıdır.
 
-`npx expo run:android` **bu kurulumda çalışmaz**: native derleme yapar, JDK ve
-Android SDK ister. Gerekirse önce `npx expo prebuild` ile `mobile/android/`
-yeniden üretilir (bu klasör git'e girmez).
+## Uygulama kuralları
 
-## Simülasyon kuralları
-
-- **Otobüsler canlıdır**: konum duvar saatinden deterministik hesaplanır
-  (`mobile/src/data/buses.ts`), sunucu ya da kalıcı durum tutulmaz. Hız çarpanı
-  `.env` içindeki `EXPO_PUBLIC_SIM_SPEED` (10 → gerçek 30 sn ≈ 5 dk yol).
-- **Yalnızca duraktaki otobüse binilir**: araç her durakta 3 sim-dakika bekler
-  (SIM_SPEED=10'da gerçek ~18 sn). Yoldayken "Bin" düğmesi kapalıdır.
-- **İniş de yalnızca durakta yapılır**. Durak seçilmez — kayda aracın o an
-  beklediği durak yazılır.
-- **İnmeden binilemez**: kişi başına aynı anda tek aktif yolculuk olur.
-- **Son durakta otomatik iniş**: yolcu inmezse araç son durağa vardığında
-  yolculuk kendiliğinden kapanır ve Geçmiş'e normal kayıt olarak yazılır. Bu an
-  binişte hesaplanıp saklandığı için uygulama kapalıyken de doğru işler.
-- **Yolculuk süresi** = araçta geçen gerçek süre × SIM_SPEED (en az 1 dk).
-- İniş anında kayıt izleme merkezine gönderilir; sunucuya ulaşılamazsa
-  **Geçmiş** ekranında "Bekliyor" olarak durur ve tekrar gönderilebilir.
-- **Ücret/bakiye kavramı yoktur**: tam ve öğrenci yalnızca statü farkıdır.
-- **Ayarlar → Demo saat modu**: grafiklerde farklı saatlere veri üretmek için
-  biniş saatini elle seçme imkânı.
+- **Giriş zorunludur.** Kullanıcı listesi, demo kipi ve geliştirici ayarları
+  kaldırıldı — uygulamaya yalnızca hesapla girilir.
+- **Yalnızca duraktaki araca binilir/inilir.** Durak seçilmez; kayda aracın o an
+  beklediği durak yazılır. Kuralı sunucu uygular.
+- **İnmeden binilemez:** kişi başına aynı anda tek açık yolculuk olur. Başka
+  araca binilirse önceki yolculuk "yarıda kaldı" (`ABANDONED`) sayılır.
+- **Son durakta otomatik iniş** yolcu inmeyi unutursa devreye girer.
+- **Ücret/bakiye kavramı yoktur:** tam ve öğrenci yalnızca statü farkıdır. Kart
+  tipini yalnızca yönetici değiştirebilir (`PATCH /admin/cards/{id}/type`);
+  süren yolculuklar etkilenmez, çünkü tip biniş anında `card_type_snapshot`
+  olarak damgalanır.
+- **Ayarlar ekranı sunucuya hiç istek atmaz:** yalnızca tema (açık/koyu) ve dil
+  (TR/EN) seçimi vardır ve bunlar telefonda saklanır.
 
 ## Notlar
 
-- Görsel kimlik arnavutkoy.bel.tr ile uyumludur (lacivert + turuncu, belediye
-  logosu `backend/public/assets/` ve `mobile/assets/` altında).
-- Veritabanı ve FastAPI bilinçli olarak yoktur; kayıtlar backend belleğinde
-  tutulur ve sunucu yeniden başlatılınca silinir. API sözleşmesi:
-  `POST /api/trips`, `GET /api/trips`, `GET /api/stats`, `GET /api/health`,
-  `DELETE /api/trips`, `GET /api/events` (SSE canlı akış).
+- Görsel kimlik arnavutkoy.bel.tr ile uyumludur (lacivert + turuncu). Belediye
+  logoları `public/assets/` ve `mobile/assets/` altındadır.
+- Chart.js `public/vendor/` içine gömülüdür; web tarafında npm bağımlılığı ve
+  derleme adımı yoktur.
+- Web sitesi backend ile **aynı origin**'den servis edilir; bu yüzden CORS
+  gerekmez ve `/admin` sayfası sunucuda korunabilir. `CORS_ORIGINS` yalnızca
+  mobil gibi harici istemciler içindir.

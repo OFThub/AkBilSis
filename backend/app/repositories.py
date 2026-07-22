@@ -2,8 +2,8 @@ import uuid
 from datetime import datetime
 from typing import Generic, Sequence, TypeVar
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import Integer, cast, func, literal, select, union_all
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.core import Direction, NotFoundError, TripStatus
 from app.models import (
@@ -275,6 +275,117 @@ class TripRepository(BaseRepository[Trip]):
             .limit(limit)
         )
         return [(sid, name, total) for sid, name, total in self.db.execute(stmt).all()]
+
+    # ── Yönetim analitiği ────────────────────────────────────────────────────
+    # Aşağıdaki sorgular yalnızca /admin/analytics uçlarını besler. Hepsi
+    # gerçek Trip kayıtlarından hesaplanır; Line.hourly_profile'daki beklenen
+    # yoğunluk verisiyle karıştırılmaz.
+
+    def hourly_by_line(self) -> list[tuple[uuid.UUID, int, int]]:
+        """(line_id, saat, biniş sayısı) — hattın kendi zirve saati buradan çıkar."""
+        hour = func.extract("hour", Trip.boarded_at)
+        stmt = (
+            select(Trip.line_id, hour, func.count(Trip.id))
+            .group_by(Trip.line_id, hour)
+            .order_by(Trip.line_id, hour)
+        )
+        return [(lid, int(h), c) for lid, h, c in self.db.execute(stmt).all()]
+
+    def count_by_line(self) -> dict[uuid.UUID, int]:
+        stmt = select(Trip.line_id, func.count(Trip.id)).group_by(Trip.line_id)
+        return {line_id: count for line_id, count in self.db.execute(stmt).all()}
+
+    def stop_usage(self, limit: int = 12) -> list[tuple[uuid.UUID, str, int, int]]:
+        """(stop_id, ad, biniş, iniş) — durak yoğunluğu iki yönün toplamıdır.
+
+        Biniş ve iniş ayrı sütunlarda döner ki admin "burada çok biniliyor ama
+        hiç inilmiyor" gibi dengesizlikleri görebilsin.
+        """
+        zero = cast(literal(0), Integer)
+
+        boardings = select(
+            Trip.board_stop_id.label("stop_id"),
+            func.count(Trip.id).label("boarding"),
+            zero.label("alighting"),
+        ).group_by(Trip.board_stop_id)
+
+        alightings = (
+            select(
+                Trip.alight_stop_id.label("stop_id"),
+                zero.label("boarding"),
+                func.count(Trip.id).label("alighting"),
+            )
+            .where(Trip.alight_stop_id.is_not(None))
+            .group_by(Trip.alight_stop_id)
+        )
+
+        combined = union_all(boardings, alightings).subquery()
+
+        stmt = (
+            select(
+                Stop.id,
+                Stop.name,
+                func.sum(combined.c.boarding),
+                func.sum(combined.c.alighting),
+            )
+            .join(Stop, Stop.id == combined.c.stop_id)
+            .group_by(Stop.id, Stop.name)
+            .order_by((func.sum(combined.c.boarding) + func.sum(combined.c.alighting)).desc())
+            .limit(limit)
+        )
+        return [
+            (sid, name, int(board or 0), int(alight or 0))
+            for sid, name, board, alight in self.db.execute(stmt).all()
+        ]
+
+    def top_pairs(self, limit: int = 10) -> list[tuple[str, str, int]]:
+        """En yoğun güzergâhlar: (biniş durağı, iniş durağı, sayı).
+
+        Yalnızca tamamlanmış yolculuklar sayılır — açık ya da terk edilmiş
+        kayıtta iniş durağı yoktur.
+        """
+        board_stop = aliased(Stop)
+        alight_stop = aliased(Stop)
+        stmt = (
+            select(board_stop.name, alight_stop.name, func.count(Trip.id).label("total"))
+            .join(board_stop, board_stop.id == Trip.board_stop_id)
+            .join(alight_stop, alight_stop.id == Trip.alight_stop_id)
+            .where(Trip.status == TripStatus.COMPLETED)
+            .group_by(board_stop.name, alight_stop.name)
+            .order_by(func.count(Trip.id).desc())
+            .limit(limit)
+        )
+        return [(a, b, total) for a, b, total in self.db.execute(stmt).all()]
+
+    def count_by_card_type(self) -> dict[str, int]:
+        stmt = select(Trip.card_type_snapshot, func.count(Trip.id)).group_by(
+            Trip.card_type_snapshot
+        )
+        return {card_type.value: count for card_type, count in self.db.execute(stmt).all()}
+
+    def recent(self, limit: int = 20) -> Sequence[Trip]:
+        stmt = (
+            select(Trip)
+            .order_by(Trip.boarded_at.desc())
+            .limit(limit)
+            .options(
+                selectinload(Trip.line),
+                selectinload(Trip.board_stop),
+                selectinload(Trip.alight_stop),
+                selectinload(Trip.bus),
+                selectinload(Trip.card).selectinload(Card.passenger),
+            )
+        )
+        return self.db.scalars(stmt).all()
+
+    def list_due(self, now: datetime) -> Sequence[Trip]:
+        """Son durağa varma anı geçmiş, hâlâ açık yolculuklar."""
+        stmt = select(Trip).where(
+            Trip.status == TripStatus.OPEN,
+            Trip.auto_alight_at.is_not(None),
+            Trip.auto_alight_at <= now,
+        )
+        return self.db.scalars(stmt).all()
 
 
 class FavoriteRepository(BaseRepository[Favorite]):

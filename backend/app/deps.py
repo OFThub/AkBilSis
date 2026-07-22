@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,10 @@ from app.database import get_db
 from app.models import Device, Passenger
 from app.repositories import PassengerRepository
 from app.services import DeviceService
+
+#: Web oturumu bu httpOnly çerezde taşınır. Mobil Authorization başlığı
+#: kullanır; iki yol da aynı erişim token'ını taşır, doğrulama tektir.
+ACCESS_COOKIE = "akbil_access"
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -29,12 +33,15 @@ def get_current_passenger(
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
     ] = None,
+    akbil_access: Annotated[str | None, Cookie()] = None,
 ) -> Passenger:
-    if credentials is None:
+    # Önce Authorization başlığı (mobil), yoksa çerez (web)
+    token = credentials.credentials if credentials else akbil_access
+    if not token:
         raise _unauthorized("Kimlik bilgisi gerekli")
 
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_access_token(token)
     except AuthError as exc:
         raise _unauthorized(exc.message)
 
