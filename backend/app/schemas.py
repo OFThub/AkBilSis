@@ -151,8 +151,7 @@ class LineLiveStatus(BaseModel):
 
 
 class ValidateRequest(BaseModel):
-    card_token: str | None = None
-    nfc_uid: str | None = None
+    bus_id: uuid.UUID
     stop_id: uuid.UUID
 
 

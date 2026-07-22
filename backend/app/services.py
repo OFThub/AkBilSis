@@ -66,6 +66,10 @@ class AuthService:
             password_hash=hash_password(password),
         )
         self.passengers.add(passenger)
+
+        card = Card(passenger_id=passenger.id, medium=CardMedium.MOBILE)
+        self.db.add(card)
+
         self.db.commit()
         self.db.refresh(passenger)
         return passenger
@@ -307,24 +311,14 @@ class ValidationService:
         self.db = db
         self.cards = CardRepository(db)
         self.buses = BusRepository(db)
-        self.stops = StopRepository(db)
         self.line_stops = LineStopRepository(db)
         self.trips = TripRepository(db)
 
-    def _resolve_card(self, card_token: str | None, nfc_uid: str | None) -> Card:
-        if card_token:
-            payload = decode_card_token(card_token)
-            card = self.cards.get(uuid.UUID(payload["sub"]))
-        elif nfc_uid:
-            card = self.cards.get_by_nfc_uid(nfc_uid)
-        else:
-            raise ConflictError("Kart jetonu veya NFC kimliği gerekli")
-
-        if card is None:
-            raise NotFoundError("Kart tanımlı değil")
-        if not card.is_active:
-            raise ForbiddenError("Kart pasif durumda")
-        return card
+    def _resolve_card(self, passenger: Passenger) -> Card:
+        active = [c for c in self.cards.list_by_passenger(passenger.id) if c.is_active]
+        if not active:
+            raise ForbiddenError("Hesabınıza bağlı aktif kart yok")
+        return active[0]
 
     def _resolve_stop(self, bus: Bus, stop_id: uuid.UUID) -> Stop:
         entry = self.line_stops.get_entry(bus.line_id, bus.direction, stop_id)
@@ -333,16 +327,13 @@ class ValidationService:
         return entry.stop
 
     def validate(
-        self, device: Device, stop_id: uuid.UUID, card_token: str | None, nfc_uid: str | None
+        self, passenger: Passenger, bus_id: uuid.UUID, stop_id: uuid.UUID
     ) -> ValidateResponse:
-        if device.bus_id is None:
-            raise ConflictError("Cihaz bir otobüse atanmamış")
-
-        bus = self.buses.get_or_fail(device.bus_id)
+        bus = self.buses.get_or_fail(bus_id)
         if not bus.is_active:
             raise ConflictError("Otobüs pasif durumda")
 
-        card = self._resolve_card(card_token, nfc_uid)
+        card = self._resolve_card(passenger)
         stop = self._resolve_stop(bus, stop_id)
         now = _now()
 
@@ -389,12 +380,10 @@ class ValidationService:
         self.db.commit()
         self.db.refresh(trip)
 
-        passenger_name = card.passenger.full_name if card.passenger else None
-
         return ValidateResponse(
             action=action,
             trip_id=trip.id,
-            passenger_name=passenger_name,
+            passenger_name=passenger.full_name,
             line_code=bus.line.code,
             stop_name=stop.name,
             occurred_at=now,

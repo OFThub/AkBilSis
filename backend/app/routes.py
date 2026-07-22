@@ -158,10 +158,8 @@ def active_trip(passenger: CurrentPassenger, db: DbSession):
 
 
 @validation_router.post("", response_model=ValidateResponse)
-def validate(payload: ValidateRequest, device: CurrentDevice, db: DbSession):
-    return ValidationService(db).validate(
-        device, payload.stop_id, payload.card_token, payload.nfc_uid
-    )
+def validate(payload: ValidateRequest, passenger: CurrentPassenger, db: DbSession):
+    return ValidationService(db).validate(passenger, payload.bus_id, payload.stop_id)
 
 
 @admin_router.get("/passengers", response_model=list[PassengerRead])
