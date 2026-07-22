@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   Image,
   Pressable,
@@ -9,9 +9,10 @@ import {
   View,
 } from "react-native";
 import { useApp } from "../context/AppContext";
-import { FARES } from "../data/lines";
+import { LINES, peakHours } from "../data/lines";
 import { colors, radius } from "../theme";
-import { formatTL, randomCardNo } from "../utils/format";
+import { hourRange, randomCardNo } from "../utils/format";
+import BusyChart from "../components/BusyChart";
 import {
   Header,
   InfoBanner,
@@ -19,31 +20,20 @@ import {
   SectionCard,
   SectionTitle,
 } from "../components/UI";
-import NfcPrompt from "../components/NfcPrompt";
 import UserPicker from "../components/UserPicker";
-import { NfcError, cancelCardScan, readTagId } from "../nfc/nfcCard";
 import { CardType, CardUser } from "../types";
-
-const TOP_UP_AMOUNTS = [50, 100, 250];
 
 type Notice = { tone: "info" | "error" | "success"; text: string } | null;
 
 /**
- * Kart işlemleri. İki mod birbirini dışlar:
- *  - NFC açık   → yalnızca etiket okutma; kullanıcı listesi hiç gösterilmez
- *  - NFC kapalı → yalnızca kayıtlı kullanıcı listesi; okutma arayüzü gösterilmez
+ * Kart işlemleri. Kullanıcı kayıtlı listeden seçilir; seçilen kartın profili,
+ * favori hatları ve yolculuk sayısı gösterilir.
  */
 export default function CardScreen() {
   const app = useApp();
-  const nfcOn = app.settings.nfcEnabled;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
-  const [amount, setAmount] = useState(TOP_UP_AMOUNTS[0]);
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
-  /** Okunan ama hiçbir kullanıcıya bağlı olmayan etiket */
-  const [unknownTagId, setUnknownTagId] = useState<string | null>(null);
 
   const [newName, setNewName] = useState("");
   const [newCardNo, setNewCardNo] = useState(randomCardNo());
@@ -51,86 +41,32 @@ export default function CardScreen() {
 
   const selected = app.users.find((u) => u.id === selectedId) ?? null;
 
-  // Ekrandan çıkarken açık NFC oturumunu kapat
-  useEffect(() => () => cancelCardScan(), []);
+  // Grafikte vurgulanan saat — demo saat modu açıkken onunla tutarlı olsun
+  const currentHour = app.settings.demoMode
+    ? app.settings.demoHour
+    : new Date().getHours();
 
-  // Mod değişince diğer modun geçici durumunu temizle
-  useEffect(() => {
-    setSelectedId(null);
-    setUnknownTagId(null);
-    setScanError(null);
-    setNotice(null);
-  }, [nfcOn]);
+  // Favoriler karta özeldir: bir kullanıcı seçilmeden ne görülür ne değiştirilebilir
+  const favoriteIds = selected ? app.favoritesFor(selected.id) : [];
+  const favoriteLines = LINES.filter((line) => favoriteIds.includes(line.id));
 
-  async function handleScan() {
-    setNotice(null);
-    setScanError(null);
-    setUnknownTagId(null);
-    setScanning(true);
-    try {
-      const tagId = await readTagId();
-      const user = app.findUserByTagId(tagId);
-      if (user) {
-        setSelectedId(user.id);
-        setNotice({
-          tone: "success",
-          text: `${user.name} — bakiye ${formatTL(user.balance)}.`,
-        });
-      } else {
-        setSelectedId(null);
-        setUnknownTagId(tagId);
-        setNotice({
-          tone: "info",
-          text: `Bu etiket (${tagId}) kayıtlı değil. Aşağıdan bu etikete bir kullanıcı tanımlayabilirsiniz.`,
-        });
-      }
-    } catch (e) {
-      const err = e as NfcError;
-      if (err.code !== "cancelled") setScanError(err.message);
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  function handleTopUp() {
-    if (!selected) {
-      setNotice({
-        tone: "error",
-        text: nfcOn ? "Önce kartı okutun." : "Önce listeden kullanıcı seçin.",
-      });
-      return;
-    }
-    const result = app.topUp(selected.id, amount);
-    if (!result.ok) {
-      setNotice({ tone: "error", text: result.error ?? "Yükleme yapılamadı." });
-      return;
-    }
-    setNotice({
-      tone: "success",
-      text: `${selected.name} kartına ${formatTL(amount)} yüklendi.`,
-    });
-  }
+  // Profil kartındaki sayaç — seçili karta ait yerel yolculuk sayısı
+  const tripCount = selected
+    ? app.history.filter((r) => r.cardNo === selected.cardNo).length
+    : 0;
 
   function handleAddUser() {
-    const result = app.addUser(
-      newName,
-      newCardNo,
-      newType,
-      unknownTagId ?? undefined
-    );
+    const result = app.addUser(newName, newCardNo, newType);
     if (!result.ok) {
       setNotice({ tone: "error", text: result.error ?? "Kullanıcı eklenemedi." });
       return;
     }
     setNotice({
       tone: "success",
-      text: unknownTagId
-        ? `${newName.trim()} eklendi ve okunan etikete bağlandı.`
-        : `${newName.trim()} kayıtlı kullanıcılara eklendi.`,
+      text: `${newName.trim()} kayıtlı kullanıcılara eklendi.`,
     });
     setNewName("");
     setNewCardNo(randomCardNo());
-    setUnknownTagId(null);
   }
 
   function handleRemove(user: CardUser) {
@@ -141,10 +77,7 @@ export default function CardScreen() {
 
   return (
     <View style={styles.root}>
-      <Header
-        title="Kart"
-        subtitle={nfcOn ? "NFC ile kart işlemleri" : "Kayıtlı kullanıcı kartları"}
-      />
+      <Header title="Kart" subtitle="Kayıtlı kullanıcı kartları" />
       <ScrollView contentContainerStyle={styles.content}>
         {selected ? (
           <View style={styles.virtualCard}>
@@ -174,111 +107,38 @@ export default function CardScreen() {
             <Text style={styles.cardNumber}>{selected.cardNo}</Text>
             <View style={styles.cardBottomRow}>
               <View>
-                <Text style={styles.balanceLabel}>Bakiye</Text>
-                <Text style={styles.balanceValue}>
-                  {formatTL(selected.balance)}
-                </Text>
+                <Text style={styles.statLabel}>Yolculuk</Text>
+                <Text style={styles.statValue}>{tripCount}</Text>
               </View>
               <Text style={styles.cardFooter}>AKBİL</Text>
             </View>
           </View>
         ) : (
           <View style={[styles.virtualCard, styles.cardPlaceholder]}>
-            <Text style={styles.placeholderTitle}>
-              {nfcOn ? "Kart okutulmadı" : "Kullanıcı seçilmedi"}
-            </Text>
+            <Text style={styles.placeholderTitle}>Kullanıcı seçilmedi</Text>
             <Text style={styles.placeholderText}>
-              {nfcOn
-                ? "Kartı okutun; etiketin kimliğine bağlı kullanıcı burada görünür."
-                : "Aşağıdaki listeden bir kullanıcı seçin."}
+              Aşağıdaki listeden bir kullanıcı seçin.
             </Text>
           </View>
         )}
 
         {notice && <InfoBanner tone={notice.tone} text={notice.text} />}
 
-        {/* ── NFC AÇIK: yalnızca okutma ── */}
-        {nfcOn && (
-          <SectionCard>
-            <SectionTitle>Kart okut</SectionTitle>
-            {scanning || scanError ? (
-              <NfcPrompt
-                state={scanError ? "error" : "waiting"}
-                error={scanError ?? undefined}
-                onRetry={handleScan}
-                onCancel={() => {
-                  cancelCardScan();
-                  setScanning(false);
-                  setScanError(null);
-                }}
-              />
-            ) : (
-              <PrimaryButton label="Kartı Okut" onPress={handleScan} />
-            )}
-            <Text style={styles.hint}>
-              Etiket yalnızca kimlik sağlar; bakiye ve kart bilgisi uygulamadaki
-              kayıtta tutulur, etikete hiçbir şey yazılmaz.
-            </Text>
-          </SectionCard>
-        )}
-
-        {/* ── NFC KAPALI: yalnızca kullanıcı listesi ── */}
-        {!nfcOn && (
-          <SectionCard>
-            <SectionTitle>Kayıtlı kullanıcılar</SectionTitle>
-            <UserPicker
-              users={app.users}
-              selectedId={selectedId}
-              onSelect={(u) => {
-                setSelectedId(u.id);
-                setNotice(null);
-              }}
-              onRemove={handleRemove}
-            />
-          </SectionCard>
-        )}
-
         <SectionCard>
-          <SectionTitle>Bakiye yükle</SectionTitle>
-          <View style={styles.amountRow}>
-            {TOP_UP_AMOUNTS.map((value) => {
-              const active = amount === value;
-              return (
-                <Pressable
-                  key={value}
-                  onPress={() => setAmount(value)}
-                  style={[styles.amountChip, active && styles.amountChipActive]}
-                >
-                  <Text
-                    style={[
-                      styles.amountLabel,
-                      active && styles.amountLabelActive,
-                    ]}
-                  >
-                    +{formatTL(value)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <PrimaryButton
-            label={
-              selected
-                ? `${selected.name} kartına ${formatTL(amount)} yükle`
-                : `${formatTL(amount)} Yükle`
-            }
-            onPress={handleTopUp}
-            disabled={!selected}
+          <SectionTitle>Kayıtlı kullanıcılar</SectionTitle>
+          <UserPicker
+            users={app.users}
+            selectedId={selectedId}
+            onSelect={(u) => {
+              setSelectedId(u.id);
+              setNotice(null);
+            }}
+            onRemove={handleRemove}
           />
         </SectionCard>
 
         <SectionCard>
-          <SectionTitle>
-            {unknownTagId ? "Bu etikete kullanıcı tanımla" : "Yeni kullanıcı"}
-          </SectionTitle>
-          {unknownTagId && (
-            <Text style={styles.tagLine}>Etiket kimliği: {unknownTagId}</Text>
-          )}
+          <SectionTitle>Yeni kullanıcı</SectionTitle>
           <TextInput
             value={newName}
             onChangeText={setNewName}
@@ -316,21 +176,141 @@ export default function CardScreen() {
                       active && styles.typeOptionLabelActive,
                     ]}
                   >
-                    {formatTL(FARES[type])}
+                    {type === "tam" ? "Tam tarife" : "İndirimli statü"}
                   </Text>
                 </Pressable>
               );
             })}
           </View>
           <View style={{ marginTop: 12 }}>
-            <PrimaryButton
-              label={unknownTagId ? "Ekle ve Etikete Bağla" : "Kullanıcı Ekle"}
-              onPress={handleAddUser}
-            />
+            <PrimaryButton label="Kullanıcı Ekle" onPress={handleAddUser} />
           </View>
-          <Text style={styles.hint}>Yeni kullanıcı ₺0,00 bakiye ile başlar.</Text>
+        </SectionCard>
+
+        <SectionCard>
+          <SectionTitle>Tüm hatlar</SectionTitle>
+          {LINES.map((line) => (
+            <LineRow
+              key={line.id}
+              code={line.code}
+              name={line.name.replace(`${line.code} `, "")}
+              stopCount={line.stops.length}
+              favorite={favoriteIds.includes(line.id)}
+              locked={!selected}
+              onToggle={() =>
+                selected && app.toggleFavorite(selected.id, line.id)
+              }
+            />
+          ))}
+          <Text style={styles.hint}>
+            {selected
+              ? `Yıldıza dokunduğunuz hatlar ${selected.name} kartının favorilerine eklenir.`
+              : "Favori eklemek için önce yukarıdan bir kullanıcı seçin — favoriler karta özeldir."}
+          </Text>
+        </SectionCard>
+
+        <SectionCard>
+          <SectionTitle>Favori hatlar</SectionTitle>
+          {!selected ? (
+            <Text style={styles.emptyFav}>
+              Kullanıcı seçilince o karta ait favori hatlar burada görünür.
+            </Text>
+          ) : favoriteLines.length === 0 ? (
+            <Text style={styles.emptyFav}>
+              {selected.name} için henüz favori hat yok — yukarıdaki listeden
+              yıldıza dokunun.
+            </Text>
+          ) : (
+            favoriteLines.map((line) => (
+              <FavoriteLine
+                key={line.id}
+                name={line.name}
+                hourly={line.hourly}
+                currentHour={currentHour}
+                peaks={peakHours(line)}
+              />
+            ))
+          )}
         </SectionCard>
       </ScrollView>
+    </View>
+  );
+}
+
+/** Hat listesi satırı — kod rozeti, ad, durak sayısı ve favori yıldızı */
+function LineRow({
+  code,
+  name,
+  stopCount,
+  favorite,
+  locked,
+  onToggle,
+}: {
+  code: string;
+  name: string;
+  stopCount: number;
+  favorite: boolean;
+  /** Kart okutulmadı — yıldız pasif, favori değiştirilemez */
+  locked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <View style={styles.lineRow}>
+      <Text style={styles.lineCode}>{code}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.lineName} numberOfLines={1}>
+          {name}
+        </Text>
+        <Text style={styles.lineMeta}>{stopCount} durak</Text>
+      </View>
+      <Pressable
+        onPress={onToggle}
+        disabled={locked}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: locked }}
+        accessibilityLabel={
+          locked
+            ? `${code} hattını favorilemek için önce kullanıcı seçin`
+            : favorite
+            ? `${code} hattını favorilerden çıkar`
+            : `${code} hattını favorile`
+        }
+        style={({ pressed }) => [styles.star, pressed && { opacity: 0.6 }]}
+      >
+        <Text
+          style={[
+            styles.starIcon,
+            favorite && styles.starIconActive,
+            locked && styles.starIconLocked,
+          ]}
+        >
+          {locked ? "🔒" : favorite ? "★" : "☆"}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/** Favori hat kartı — en yoğun saatler + gün içi yoğunluk grafiği */
+function FavoriteLine({
+  name,
+  hourly,
+  currentHour,
+  peaks,
+}: {
+  name: string;
+  hourly: number[];
+  currentHour: number;
+  peaks: number[];
+}) {
+  return (
+    <View style={styles.favCard}>
+      <Text style={styles.favName}>{name}</Text>
+      <Text style={styles.favPeaks}>
+        En yoğun: {peaks.map(hourRange).join(" · ")}
+      </Text>
+      <BusyChart hourly={hourly} currentHour={currentHour} />
     </View>
   );
 }
@@ -403,18 +383,58 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-end",
   },
-  balanceLabel: {
+  statLabel: {
     color: "#b9c3de",
     fontSize: 11,
     fontWeight: "600",
     textTransform: "uppercase",
     letterSpacing: 1,
   },
-  balanceValue: {
+  statValue: {
     color: "#ffffff",
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "800",
     marginTop: 2,
+  },
+  lineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  lineCode: {
+    fontWeight: "800",
+    fontSize: 13,
+    color: "#ffffff",
+    backgroundColor: colors.blue,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    overflow: "hidden",
+  },
+  lineName: { fontSize: 14.5, fontWeight: "700", color: colors.ink },
+  lineMeta: { fontSize: 12, color: colors.ink3, marginTop: 2 },
+  star: { paddingHorizontal: 4, paddingVertical: 2 },
+  starIcon: { fontSize: 22, color: colors.ink3 },
+  starIconActive: { color: colors.accent },
+  starIconLocked: { fontSize: 15, opacity: 0.5 },
+  emptyFav: { fontSize: 13, color: colors.ink3, lineHeight: 19 },
+  favCard: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.control,
+    padding: 12,
+    marginBottom: 10,
+  },
+  favName: { fontSize: 14.5, fontWeight: "800", color: colors.navy900 },
+  favPeaks: {
+    fontSize: 12.5,
+    color: colors.blue,
+    fontWeight: "700",
+    marginTop: 3,
+    marginBottom: 10,
   },
   cardFooter: {
     color: colors.accent,
@@ -422,21 +442,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     letterSpacing: 3,
   },
-  amountRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
-  amountChip: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.control,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  amountChipActive: {
-    borderColor: colors.blue,
-    backgroundColor: colors.chipBlueBg,
-  },
-  amountLabel: { fontSize: 15, fontWeight: "800", color: colors.ink2 },
-  amountLabelActive: { color: colors.navy900 },
   typeRow: { flexDirection: "row", gap: 10 },
   typeOption: {
     flex: 1,
@@ -464,12 +469,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.ink,
     backgroundColor: colors.surface,
-  },
-  tagLine: {
-    fontSize: 12.5,
-    color: colors.blue,
-    fontWeight: "700",
-    marginBottom: 10,
   },
   hint: { fontSize: 12.5, color: colors.ink3, marginTop: 10, lineHeight: 17 },
 });

@@ -44,7 +44,6 @@ const REQUIRED_FIELDS = [
   "boardTime",
   "alightTime",
   "durationMin",
-  "fare",
 ];
 
 app.get("/api/health", (req, res) => {
@@ -89,7 +88,6 @@ app.post("/api/trips", (req, res) => {
     boardTime: body.boardTime,
     alightTime: body.alightTime,
     durationMin: Number(body.durationMin),
-    fare: Number(body.fare),
     receivedAt: new Date().toISOString(),
   };
   trips.push(trip);
@@ -118,8 +116,6 @@ app.get("/api/stats", (req, res) => {
   const byLine = {};
   const byStop = {};
   const byCardType = { tam: 0, ogrenci: 0 };
-  const revenueByCardType = { tam: 0, ogrenci: 0 };
-  let revenue = 0;
   let totalDuration = 0;
 
   for (const t of trips) {
@@ -129,11 +125,7 @@ app.get("/api/stats", (req, res) => {
     // Durak kullanımı = biniş + iniş toplamı
     byStop[t.boardingStop] = (byStop[t.boardingStop] || 0) + 1;
     byStop[t.alightingStop] = (byStop[t.alightingStop] || 0) + 1;
-    if (byCardType[t.cardType] !== undefined) {
-      byCardType[t.cardType]++;
-      revenueByCardType[t.cardType] += t.fare;
-    }
-    revenue += t.fare;
+    if (byCardType[t.cardType] !== undefined) byCardType[t.cardType]++;
     totalDuration += t.durationMin;
   }
 
@@ -148,17 +140,12 @@ app.get("/api/stats", (req, res) => {
 
   res.json({
     totalTrips: trips.length,
-    revenue: Math.round(revenue * 100) / 100,
     avgDurationMin:
       trips.length > 0 ? Math.round(totalDuration / trips.length) : 0,
     hourly,
     lines,
     topStops,
     byCardType,
-    revenueByCardType: {
-      tam: Math.round(revenueByCardType.tam * 100) / 100,
-      ogrenci: Math.round(revenueByCardType.ogrenci * 100) / 100,
-    },
   });
 });
 

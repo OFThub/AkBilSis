@@ -21,17 +21,13 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "android.permission.NFC"
-      ],
+      "permissions": [],
       "package": "com.anonymous.akbilarnavutkoy"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "react-native-nfc-manager"
-    ],
+    "plugins": [],
     "extra": {
       "eas": {
         "projectId": "f4c604cd-0fb5-4c2e-aec3-c0f9f88e2790"

@@ -1,10 +1,4 @@
-import { CardType } from "../types";
-
-// Bilet ücretleri (simülasyon değerleri) — tek yerden yönetilir
-export const FARES: Record<CardType, number> = {
-  tam: 20.0,
-  ogrenci: 9.76,
-};
+// Ücret kavramı yoktur: tam/öğrenci yalnızca statü farkıdır, fiyat tutulmaz.
 
 export interface BusLine {
   id: string;

@@ -132,11 +132,6 @@ const cardTypeChart = new Chart(document.getElementById("cardTypeChart"), {
   },
 });
 
-const fmtTL = new Intl.NumberFormat("tr-TR", {
-  style: "currency",
-  currency: "TRY",
-});
-
 function hhmm(iso) {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, "0")}:${String(
@@ -146,9 +141,6 @@ function hhmm(iso) {
 
 function updateStats(stats) {
   document.getElementById("tileTrips").textContent = stats.totalTrips;
-  document.getElementById("tileRevenue").textContent = fmtTL.format(
-    stats.revenue
-  );
   document.getElementById("tileDuration").textContent =
     stats.avgDurationMin + " dk";
 
@@ -178,15 +170,9 @@ function updateStats(stats) {
 
 function renderTypeSummary(stats) {
   const total = stats.byCardType.tam + stats.byCardType.ogrenci;
-  const rev = stats.revenueByCardType || { tam: 0, ogrenci: 0 };
   const rows = [
-    { key: "tam", name: "Tam", count: stats.byCardType.tam, revenue: rev.tam },
-    {
-      key: "ogrenci",
-      name: "Öğrenci",
-      count: stats.byCardType.ogrenci,
-      revenue: rev.ogrenci,
-    },
+    { key: "tam", name: "Tam", count: stats.byCardType.tam },
+    { key: "ogrenci", name: "Öğrenci", count: stats.byCardType.ogrenci },
   ];
   document.getElementById("typeSummary").innerHTML = rows
     .map((r) => {
@@ -196,9 +182,7 @@ function renderTypeSummary(stats) {
         <div class="type-head">
           <span class="type-dot ${r.key}" aria-hidden="true"></span>
           <span class="type-name">${r.name}</span>
-          <span class="type-nums"><strong>${r.count}</strong> basış · ${fmtTL.format(
-            r.revenue
-          )} · %${pct}</span>
+          <span class="type-nums"><strong>${r.count}</strong> basış · %${pct}</span>
         </div>
         <div class="type-bar"><div class="type-bar-fill ${r.key}" style="width:${pct}%"></div></div>
       </div>`;
@@ -236,7 +220,6 @@ function updateTable(trips) {
         <td><span class="card-chip ${t.cardType === "tam" ? "tam" : "ogrenci"}">${
           t.cardType === "tam" ? "Tam" : "Öğrenci"
         }</span> <span title="Kart no">${esc(maskCard(t.cardNo))}</span></td>
-        <td class="fare-cell">${fmtTL.format(t.fare)}</td>
       </tr>`
     )
     .join("");

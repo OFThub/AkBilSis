@@ -235,7 +235,6 @@ tr:only-child td.time-cell::before { display: none; }
 .card-chip.tam { background: #eaf0fa; color: var(--blue-series); }
 .card-chip.ogrenci { background: #f8efdd; color: #8a5600; }
 
-.fare-cell { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 
 /* Kart tipi özeti */
 .type-summary { display: flex; flex-direction: column; gap: 18px; padding-top: 8px; }

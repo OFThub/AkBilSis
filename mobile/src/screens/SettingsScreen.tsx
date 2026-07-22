@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Switch,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { checkHealth } from "../api/client";
@@ -23,7 +22,6 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 export default function SettingsScreen() {
   const app = useApp();
-  const [urlDraft, setUrlDraft] = useState(app.settings.backendUrl);
   const [testResult, setTestResult] = useState<
     { ok: boolean; text: string } | null
   >(null);
@@ -33,15 +31,14 @@ export default function SettingsScreen() {
   async function handleTest() {
     setTesting(true);
     setTestResult(null);
-    app.updateSettings({ backendUrl: urlDraft });
-    const ok = await checkHealth(urlDraft);
+    const ok = await checkHealth();
     setTesting(false);
     setTestResult(
       ok
         ? { ok: true, text: "Bağlantı başarılı — izleme merkezi erişilebilir." }
         : {
             ok: false,
-            text: "Sunucuya ulaşılamadı. Backend'in çalıştığından ve adresin doğru olduğundan emin olun.",
+            text: "Sunucuya ulaşılamadı. Backend'in çalıştığından ve .env dosyasındaki adresin doğru olduğundan emin olun.",
           }
     );
   }
@@ -61,24 +58,16 @@ export default function SettingsScreen() {
       <Header title="Ayarlar" subtitle="Bağlantı ve simülasyon" />
       <ScrollView contentContainerStyle={styles.content}>
         <SectionCard>
-          <SectionTitle>İzleme merkezi adresi</SectionTitle>
-          <TextInput
-            value={urlDraft}
-            onChangeText={setUrlDraft}
-            style={styles.input}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="http://192.168.1.20:4000"
-            placeholderTextColor={colors.ink3}
-          />
+          <SectionTitle>İzleme merkezi</SectionTitle>
           <Text style={styles.hint}>
-            Telefonla test ederken bilgisayarınızın ağ adresini kullanın —
-            backend açılırken "Ağ (mobil)" satırında yazar. Bilgisayarda web
-            modunda http://localhost:4000 yeterli.
+            Sunucu adresi uygulamada tutulmaz; gizli .env dosyasından okunur ve
+            burada gösterilmez. Adresi değiştirmek için mobile/.env dosyasındaki
+            EXPO_PUBLIC_BACKEND_URL satırını düzenleyip uygulamayı
+            "npx expo start -c" ile yeniden başlatın.
           </Text>
           <View style={{ marginTop: 12 }}>
             <PrimaryButton
-              label={testing ? "Deneniyor…" : "Kaydet ve Bağlantıyı Test Et"}
+              label={testing ? "Deneniyor…" : "Bağlantıyı Test Et"}
               onPress={handleTest}
               disabled={testing}
               tone="navy"
@@ -141,29 +130,6 @@ export default function SettingsScreen() {
         </SectionCard>
 
         <SectionCard>
-          <View style={styles.switchRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.switchTitle}>NFC</Text>
-              <Text style={styles.hint}>
-                Açık: kart okutulur, etiketin kimliğine bağlı kayıtlı kullanıcı
-                bulunur — kullanıcı listesi gösterilmez. Kapalı: NFC tamamen
-                devre dışı kalır, kullanıcı kayıtlı listeden seçilir — okutma
-                arayüzü gösterilmez. Expo Go native NFC içermediği için orada
-                kapalı kullanın.
-              </Text>
-            </View>
-            <Switch
-              value={app.settings.nfcEnabled}
-              onValueChange={(value) =>
-                app.updateSettings({ nfcEnabled: value })
-              }
-              trackColor={{ true: colors.blue, false: colors.line }}
-              thumbColor="#ffffff"
-            />
-          </View>
-        </SectionCard>
-
-        <SectionCard>
           <SectionTitle>Uygulama</SectionTitle>
           <PrimaryButton
             label={
@@ -175,9 +141,8 @@ export default function SettingsScreen() {
             tone="danger"
           />
           <Text style={styles.hint}>
-            Aktif yolculuk ve yolculuk geçmişi silinir; izleme merkezi adresi
-            ile NFC modu korunur. Karttaki bakiye etikette durduğu için
-            etkilenmez.
+            Devam eden yolculuklar ve yolculuk geçmişi silinir. Kayıtlı
+            kullanıcılar, favori hatlar ve .env'deki sunucu adresi etkilenmez.
           </Text>
         </SectionCard>
 
@@ -192,17 +157,6 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surface },
   content: { padding: 16, paddingBottom: 28 },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.control,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    fontWeight: "600",
-    color: colors.ink,
-    backgroundColor: colors.surface,
-  },
   hint: { fontSize: 12.5, color: colors.ink3, marginTop: 8, lineHeight: 17 },
   switchRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   switchTitle: { fontSize: 15, fontWeight: "700", color: colors.ink },

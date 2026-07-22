@@ -46,7 +46,6 @@ const LINES = [
   },
 ];
 
-const FARES = { tam: 20.0, ogrenci: 9.76 };
 
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -84,7 +83,6 @@ function makeTrip() {
     boardTime: board.toISOString(),
     alightTime: alight.toISOString(),
     durationMin,
-    fare: FARES[cardType],
   };
 }
 

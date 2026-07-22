@@ -1,12 +1,10 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, radius } from "../theme";
-import { formatTL } from "../utils/format";
 import { CardUser } from "../types";
 
 /**
- * Kayıtlı kullanıcı listesi — yalnızca NFC kapalıyken gösterilir.
- * NFC açıkken kullanıcıyı etiket belirlediği için bu bileşen hiç render edilmez.
+ * Kayıtlı kullanıcı listesi — kullanıcı buradan seçilerek doğrulanır.
  */
 export default function UserPicker({
   users,
@@ -58,7 +56,6 @@ export default function UserPicker({
                   {user.cardType === "tam" ? "TAM" : "ÖĞRENCİ"}
                 </Text>
               </View>
-              <Text style={styles.balance}>{formatTL(user.balance)}</Text>
             </View>
             {onRemove && (
               <Pressable
@@ -117,12 +114,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 10,
     letterSpacing: 0.8,
-  },
-  balance: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: colors.navy900,
-    fontVariant: ["tabular-nums"],
   },
   removeBtn: { paddingHorizontal: 6, paddingVertical: 4 },
   removeText: { fontSize: 12.5, color: colors.danger, fontWeight: "700" },

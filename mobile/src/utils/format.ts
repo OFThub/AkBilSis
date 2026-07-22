@@ -1,11 +1,4 @@
-/** Kuruş hassasiyetinde yuvarla — bakiye aritmetiği hep bununla yapılır */
-export function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-export function formatTL(value: number): string {
-  return "₺" + value.toFixed(2).replace(".", ",");
-}
+// Para birimi biçimlendirici yoktur — uygulamada ücret kavramı kaldırıldı.
 
 export function hhmm(iso: string): string {
   const d = new Date(iso);
