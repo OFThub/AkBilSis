@@ -114,29 +114,48 @@ Panelin sağ altındaki **"Verileri temizle"** tüm kayıtları sıfırlar.
 
 ## 2. Mobil uygulamayı başlat
 
+VS Code terminalinde tek komut yeter — Android SDK, JDK ya da emülatör gerekmez:
+
 ```powershell
 cd mobile
 npm install        # ilk seferde
-npx expo start
+npm start
 ```
 
-- **Telefonda**: Expo Go uygulamasını kurup terminaldeki QR kodu okutun.
-  Ardından uygulamada **Ayarlar → İzleme merkezi adresi** alanına backend'in
-  ağ adresini yazıp "Bağlantıyı Test Et" ile doğrulayın (telefon ve bilgisayar
-  aynı Wi-Fi'da olmalı).
-- **Bilgisayarda hızlı deneme**: `npx expo start --web` → tarayıcıda açılır;
-  varsayılan adres `http://localhost:4000` bu modda doğrudan çalışır.
+- **Telefonda (önerilen)**: Terminalde çıkan QR kodu **Expo Go** ile okutun.
+  Telefon ve bilgisayar aynı Wi-Fi'da olmalı.
+- **Bilgisayarda hızlı deneme**: `npm run web` → tarayıcıda açılır.
+
+Backend adresi arayüzden değil `mobile/.env` dosyasından okunur
+(`EXPO_PUBLIC_BACKEND_URL`). Telefondan test ederken **`localhost` yazmayın** —
+telefonda o adres telefonun kendisidir. Bilgisayarın ağ adresini yazın; backend
+açılışta bu adresi zaten ekrana basar. `.env` değişince Metro önbelleğini
+temizleyin: `npx expo start -c`.
+
+> Port 8081 doluysa Expo başka port sorar. Eskiden kalma bir Metro süreci
+> varsa kapatın ya da `npm start -- --port 8082` ile başlatın.
+
+`npx expo run:android` **bu kurulumda çalışmaz**: native derleme yapar, JDK ve
+Android SDK ister. Gerekirse önce `npx expo prebuild` ile `mobile/android/`
+yeniden üretilir (bu klasör git'e girmez).
 
 ## Simülasyon kuralları
 
-- **Kart Bas (Bin)**: biniş saati = o anki saat; kart tipine göre ücret düşer
-  (Tam ₺20,00 / Öğrenci ₺9,76 — `mobile/src/data/lines.ts` içinde tek yerden).
-- **İnmeden binilemez**: aktif yolculuk bitmeden yeni biniş engellenir.
-- **İniş saati** seçilen durağa göre otomatik hesaplanır: biniş saati +
-  duraklar arası sürelerin toplamı (hat/durak verileri `lines.ts`).
-- Bakiye yetersizse biniş engellenir; **Kartım** ekranından bakiye yüklenir.
+- **Otobüsler canlıdır**: konum duvar saatinden deterministik hesaplanır
+  (`mobile/src/data/buses.ts`), sunucu ya da kalıcı durum tutulmaz. Hız çarpanı
+  `.env` içindeki `EXPO_PUBLIC_SIM_SPEED` (10 → gerçek 30 sn ≈ 5 dk yol).
+- **Yalnızca duraktaki otobüse binilir**: araç her durakta 3 sim-dakika bekler
+  (SIM_SPEED=10'da gerçek ~18 sn). Yoldayken "Bin" düğmesi kapalıdır.
+- **İniş de yalnızca durakta yapılır**. Durak seçilmez — kayda aracın o an
+  beklediği durak yazılır.
+- **İnmeden binilemez**: kişi başına aynı anda tek aktif yolculuk olur.
+- **Son durakta otomatik iniş**: yolcu inmezse araç son durağa vardığında
+  yolculuk kendiliğinden kapanır ve Geçmiş'e normal kayıt olarak yazılır. Bu an
+  binişte hesaplanıp saklandığı için uygulama kapalıyken de doğru işler.
+- **Yolculuk süresi** = araçta geçen gerçek süre × SIM_SPEED (en az 1 dk).
 - İniş anında kayıt izleme merkezine gönderilir; sunucuya ulaşılamazsa
   **Geçmiş** ekranında "Bekliyor" olarak durur ve tekrar gönderilebilir.
+- **Ücret/bakiye kavramı yoktur**: tam ve öğrenci yalnızca statü farkıdır.
 - **Ayarlar → Demo saat modu**: grafiklerde farklı saatlere veri üretmek için
   biniş saatini elle seçme imkânı.
 

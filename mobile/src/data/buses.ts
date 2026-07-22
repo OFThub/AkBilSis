@@ -12,14 +12,18 @@
  */
 
 import { SIM_SPEED } from "../config/env";
-import { BusLine, cumulativeMinutes, findLine } from "./lines";
+import { BusLine, findLine } from "./lines";
 
 /** Hat başına sefer hâlindeki araç sayısı */
 const BUSES_PER_LINE = 3;
 /** Son durak molası — araç bu sırada sefere hazırlanır, biniş kapalıdır */
 const LAYOVER_MIN = 6;
-/** Duraklar arası mesafenin ilk %15'i "durakta bekliyor" sayılır */
-const AT_STOP_FRACTION = 0.15;
+/**
+ * Araç her durakta bu kadar bekler (sim-dakika). Biniş ve iniş yalnızca bu
+ * pencerede yapılabildiği için süre kullanıcının düğmeye yetişeceği kadar
+ * uzun tutulur: SIM_SPEED=10'da 3 sim-dakika ≈ gerçek 18 saniye.
+ */
+const DWELL_MIN = 3;
 
 const PLATE_LETTERS = ["AKB", "ARN", "BLD", "TSK", "HRC", "MDK"];
 
@@ -28,16 +32,17 @@ export interface LiveBus {
   id: string;
   plate: string;
   lineId: string;
-  /** En son geçtiği durak */
+  /** Araç duraktaysa bulunduğu durak; yoldaysa en son ayrıldığı durak */
   fromIndex: number;
   /** Yaklaştığı durak (molada son durağın kendisi) */
   toIndex: number;
-  /** Biniş/iniş durağı bundan belirlenir — aracın o an en yakın olduğu durak */
-  nearestStopIndex: number;
+  /** Durakta bekliyor — biniş ve iniş yalnızca bu sırada yapılabilir */
   atStop: boolean;
-  /** Sıradaki durağa kalan dakika; molada sefere kalan süre */
+  /** Sıradaki olaya kalan dakika: duraktayken kalkışa, yoldayken varışa, molada sefere */
   minutesToNext: number;
-  /** Son durakta bekliyor — yolcu binemez, ama araçtaki yolcu inebilir */
+  /** Son durağa kalan sim-dakika — yuvarlanmaz, otomatik iniş anı bundan hesaplanır */
+  minutesToTerminus: number;
+  /** Son durakta bekliyor — sefer bitti, yolcu alınmaz */
   layover: boolean;
 }
 
@@ -75,11 +80,26 @@ function simMinutes(now: Date): number {
   return (now.getTime() / 60000) * SIM_SPEED;
 }
 
+/**
+ * Sefer tarifesi: stopArrival[i] = sefer başlangıcından o durağa varışa kadar
+ * geçen dakika. Her durakta DWELL_MIN kadar beklendiği için duraklama süresi
+ * yol süresine eklenir — "durakta olma" hâli buradan doğar, mesafeden
+ * türetilmez.
+ */
+export function stopSchedule(line: BusLine): number[] {
+  const arrival = [0];
+  for (let i = 1; i < line.stops.length; i++) {
+    arrival.push(arrival[i - 1] + DWELL_MIN + (line.minutesBetween[i - 1] ?? 0));
+  }
+  return arrival;
+}
+
 /** Hattın o anda yolda olan araçları — sefer sırasına göre */
 export function busesForLine(line: BusLine, now: Date): LiveBus[] {
-  const cum = cumulativeMinutes(line, 0);
+  const arrival = stopSchedule(line);
   const lastIndex = line.stops.length - 1;
-  const routeMin = cum[lastIndex];
+  // Sefer son durağa varışla biter; ardından mola gelir
+  const routeMin = arrival[lastIndex];
   const cycleMin = routeMin + LAYOVER_MIN;
   const clock = simMinutes(now);
 
@@ -95,27 +115,32 @@ export function busesForLine(line: BusLine, now: Date): LiveBus[] {
         ...base,
         fromIndex: lastIndex,
         toIndex: lastIndex,
-        nearestStopIndex: lastIndex,
-        atStop: true,
+        atStop: false,
         minutesToNext: Math.max(1, Math.ceil(cycleMin - pos)),
+        minutesToTerminus: 0,
         layover: true,
       };
     }
 
-    // Hangi iki durak arasında: cum[i] <= pos < cum[i+1]
+    // Hangi durakta/dilimde: arrival[i] <= pos < arrival[i+1].
+    // pos < arrival[lastIndex] olduğundan döngü lastIndex'e ulaşamaz.
     let fromIndex = 0;
-    while (fromIndex < lastIndex - 1 && cum[fromIndex + 1] <= pos) fromIndex++;
+    while (fromIndex < lastIndex && arrival[fromIndex + 1] <= pos) fromIndex++;
+
+    const departure = arrival[fromIndex] + DWELL_MIN;
+    const atStop = pos < departure;
     const toIndex = fromIndex + 1;
-    const segmentMin = cum[toIndex] - cum[fromIndex];
-    const progress = segmentMin > 0 ? (pos - cum[fromIndex]) / segmentMin : 0;
 
     return {
       ...base,
       fromIndex,
       toIndex,
-      nearestStopIndex: progress < 0.5 ? fromIndex : toIndex,
-      atStop: progress < AT_STOP_FRACTION,
-      minutesToNext: Math.max(1, Math.ceil(cum[toIndex] - pos)),
+      atStop,
+      minutesToNext: Math.max(
+        1,
+        Math.ceil((atStop ? departure : arrival[toIndex]) - pos)
+      ),
+      minutesToTerminus: routeMin - pos,
       layover: false,
     };
   });
@@ -137,7 +162,11 @@ export function busLocationText(bus: LiveBus, line: BusLine): string {
   if (bus.layover) {
     return `Son durakta — ${bus.minutesToNext} dk sonra sefere çıkıyor`;
   }
-  if (bus.atStop) return `${line.stops[bus.fromIndex]} durağında`;
+  if (bus.atStop) {
+    return `${line.stops[bus.fromIndex]} durağında — ${
+      bus.minutesToNext
+    } dk sonra kalkıyor`;
+  }
   return `${line.stops[bus.fromIndex]} → ${line.stops[bus.toIndex]} · ${
     bus.minutesToNext
   } dk`;

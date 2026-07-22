@@ -21,9 +21,10 @@ import {
   isCompleted,
 } from "../types";
 
-// v5: favoriler kişiye bağlandı, ücret alanı kaldırıldı, biniş anında kayıt açılıyor
-const STORAGE_KEY = "akbil-state-v5";
+// v6: biniş/iniş yalnızca durakta, aktif yolculukta otomatik iniş damgası var
+const STORAGE_KEY = "akbil-state-v6";
 const LEGACY_KEYS = [
+  "akbil-state-v5",
   "akbil-state-v4",
   "akbil-state-v3",
   "akbil-state-v2",
@@ -118,6 +119,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(defaultState);
   const [ready, setReady] = useState(false);
   const loadedRef = useRef(false);
+  /** Otomatik inişi başlamış yolculuklar — tik üst üste binince tekrar kapatılmasın */
+  const closingRef = useRef<Set<string>>(new Set());
 
   // Kalıcı durum: açılışta yükle (eski sürüm kayıtları da okunur)
   useEffect(() => {
@@ -138,9 +141,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               Array.isArray(saved.users) && saved.users.length > 0
                 ? saved.users
                 : base.users,
-            // v3 ve öncesinde aktif yolculuk kişiye bağlı değildi — taşınamaz
+            // v5 ve öncesinde aktif yolculukta terminusRealTime yok; otomatik
+            // iniş anı geriye dönük hesaplanamayacağı için o kayıtlar taşınmaz
             activeTrips: Array.isArray(saved.activeTrips)
-              ? saved.activeTrips
+              ? saved.activeTrips.filter(
+                  (t) => typeof t?.terminusRealTime === "string"
+                )
               : [],
             history: Array.isArray(saved.history) ? saved.history : [],
             // v4 ve öncesinde favoriler ortaktı — hangi karta ait olduğu
@@ -193,7 +199,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const removeUser = useCallback((id: string) => {
-    setState((s) => ({ ...s, users: s.users.filter((u) => u.id !== id) }));
+    setState((s) => ({
+      ...s,
+      users: s.users.filter((u) => u.id !== id),
+      // Sahibi silinen yolculuk kapatılamaz: araçta hayalet yolcu olarak
+      // sayılmaya devam etmesin diye aktif listeden de düşer
+      activeTrips: s.activeTrips.filter((t) => t.userId !== id),
+    }));
   }, []);
 
   const activeTripFor = useCallback(
@@ -236,6 +248,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           error: "Bu araç son durakta sefer bekliyor — yoldaki bir araç seçin.",
         };
       }
+      // Yolcu yalnızca durakta duran araca binebilir
+      if (!bus.atStop) {
+        return {
+          ok: false,
+          error: `Bu otobüs şu an yolda. ${
+            line.stops[bus.toIndex]
+          } durağına yanaştığında binebilirsiniz.`,
+        };
+      }
 
       // Kayda yazılan saat demo modunda kaydırılabilir; süre ölçümü için
       // gerçek an ayrıca saklanır
@@ -243,6 +264,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (state.settings.demoMode) {
         boardDate.setHours(state.settings.demoHour);
       }
+
+      // Yolcu inmezse son durakta otomatik indirilecek: o an tarifeden bilinir,
+      // sim-dakika gerçek milisaniyeye çevrilip damga olarak saklanır
+      const terminusRealMs =
+        now.getTime() + (bus.minutesToTerminus / SIM_SPEED) * 60000;
 
       // Kayıt binişte açılır: yolcunun araçta olduğu buradan bilinir, geçmişte
       // hemen görünür ve inişte aynı kayıt tamamlanır
@@ -252,7 +278,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         cardNo: user.cardNo,
         cardType: user.cardType,
         line: line.name,
-        boardingStop: line.stops[bus.nearestStopIndex],
+        boardingStop: line.stops[bus.fromIndex],
         boardTime: boardDate.toISOString(),
         alightingStop: null,
         alightTime: null,
@@ -267,9 +293,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         lineId,
         busId,
         busPlate: bus.plate,
-        boardingStopIndex: bus.nearestStopIndex,
+        boardingStopIndex: bus.fromIndex,
         boardTime: boardDate.toISOString(),
         boardRealTime: now.toISOString(),
+        terminusRealTime: new Date(terminusRealMs).toISOString(),
       };
       setState((s) => ({
         ...s,
@@ -281,28 +308,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [state.users, state.activeTrips, state.settings]
   );
 
-  const alight = useCallback(
-    async (userId: string): Promise<AlightResult> => {
-      const trip = state.activeTrips.find((t) => t.userId === userId);
-      if (!trip) return { ok: false, error: "Aktif yolculuk yok." };
+  /**
+   * Yolculuğu kapatan tek yol — elle iniş de son durakta otomatik iniş de
+   * buradan geçer, böylece iki akış birebir aynı kaydı üretir.
+   *
+   * `alightRealMs` inişin **gerçek** anıdır: otomatik inişte aracın son durağa
+   * vardığı damga verilir, böylece kontrol tiki geç çalışsa da kayda doğru
+   * süre yazılır.
+   */
+  const completeTrip = useCallback(
+    async (
+      trip: ActiveTrip,
+      alightStopIndex: number,
+      alightRealMs: number
+    ): Promise<AlightResult> => {
       const line = findLine(trip.lineId);
       if (!line) return { ok: false, error: "Hat bulunamadı." };
-      const user = state.users.find((u) => u.id === userId);
+      const user = state.users.find((u) => u.id === trip.userId);
       if (!user) return { ok: false, error: "Kayıtlı kullanıcı bulunamadı." };
 
-      // İniş durağı seçilmez: aracın gerçek zamanlı en yakın durağıdır
-      const now = new Date();
-      const bus = findBus(trip.lineId, trip.busId, now);
-      if (!bus) {
+      // Elle iniş ile otomatik iniş tiki aynı ana denk gelebilir; kayıt bir kez
+      // tamamlansın ve sunucuya bir kez gitsin
+      if (closingRef.current.has(trip.recordId)) {
         return {
           ok: false,
-          error: "Aracın konumu okunamadı — birazdan tekrar deneyin.",
+          error: "Yolculuk kapatılıyor — birazdan Geçmiş'te görünecek.",
         };
       }
+      closingRef.current.add(trip.recordId);
 
       // Süre = araçta geçen gerçek zaman × simülasyon hızı (en az 1 dk)
       const elapsedRealMin =
-        (now.getTime() - new Date(trip.boardRealTime).getTime()) / 60000;
+        (alightRealMs - new Date(trip.boardRealTime).getTime()) / 60000;
       const durationMin = Math.max(1, Math.round(elapsedRealMin * SIM_SPEED));
       const boardDate = new Date(trip.boardTime);
       const alightDate = new Date(boardDate.getTime() + durationMin * 60000);
@@ -317,7 +354,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         boardingStop:
           existing?.boardingStop ?? line.stops[trip.boardingStopIndex],
         boardTime: trip.boardTime,
-        alightingStop: line.stops[bus.nearestStopIndex],
+        alightingStop: line.stops[alightStopIndex],
         alightTime: alightDate.toISOString(),
         durationMin,
         busPlate: trip.busPlate,
@@ -327,7 +364,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Önce yerelde bitir (iniş), sonra göndermeyi dene
       setState((s) => ({
         ...s,
-        activeTrips: s.activeTrips.filter((t) => t.userId !== userId),
+        activeTrips: s.activeTrips.filter(
+          (t) => t.recordId !== trip.recordId
+        ),
         // Binişteki kayıt beklenen yerde yoksa (bozuk/elden düşme durumu)
         // tamamlanan yolculuk sessizce kaybolmasın diye başa eklenir
         history: s.history.some((r) => r.localId === trip.recordId)
@@ -346,8 +385,79 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       return { ok: true, record, sent };
     },
-    [state.activeTrips, state.users, state.history]
+    [state.users, state.history]
   );
+
+  const alight = useCallback(
+    async (userId: string): Promise<AlightResult> => {
+      const trip = state.activeTrips.find((t) => t.userId === userId);
+      if (!trip) return { ok: false, error: "Aktif yolculuk yok." };
+      const line = findLine(trip.lineId);
+      if (!line) return { ok: false, error: "Hat bulunamadı." };
+
+      const now = new Date();
+      const bus = findBus(trip.lineId, trip.busId, now);
+      if (!bus) {
+        return {
+          ok: false,
+          error: "Aracın konumu okunamadı — birazdan tekrar deneyin.",
+        };
+      }
+
+      // Araç son durağa varmışsa yolculuk zaten bitti: otomatik iniş tiki bir
+      // saniye içinde kapatacaktı, kullanıcı önce davrandıysa aynı sonucu verir
+      if (bus.layover) {
+        return completeTrip(trip, line.stops.length - 1, now.getTime());
+      }
+      // Yolcu yalnızca durakta inebilir; durak seçilmez, aracın durduğu duraktır
+      if (!bus.atStop) {
+        return {
+          ok: false,
+          error: `Otobüs duraklar arasında. ${
+            line.stops[bus.toIndex]
+          } durağına varınca inebilirsiniz.`,
+        };
+      }
+      return completeTrip(trip, bus.fromIndex, now.getTime());
+    },
+    [state.activeTrips, completeTrip]
+  );
+
+  /**
+   * Son durakta otomatik iniş. Yolcu inmeyi unutursa aracın son durağa vardığı
+   * anda yolculuk kapanır ve geçmişe normal bir kayıt olarak yazılır.
+   *
+   * Aracın anlık konumuna bakılmaz, binişte saklanan damgaya bakılır: konum
+   * duvar saatinden döngüsel hesaplandığı için uygulama kapalıyken tamamlanan
+   * tur konumdan okunamaz, damgadan okunur.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+
+    async function sweep() {
+      const nowMs = Date.now();
+      for (const trip of state.activeTrips) {
+        if (cancelled) return;
+        const dueMs = new Date(trip.terminusRealTime).getTime();
+        if (!Number.isFinite(dueMs) || dueMs > nowMs) continue;
+        // Kapanışı süren yolculuğu atla — completeTrip zaten kilitli, boşuna
+        // hata döndürmesin
+        if (closingRef.current.has(trip.recordId)) continue;
+        const line = findLine(trip.lineId);
+        if (!line) continue;
+        await completeTrip(trip, line.stops.length - 1, dueMs);
+      }
+    }
+
+    // Uygulama kapalıyken vakti gelen yolculuklar için açılışta hemen bir kez
+    sweep();
+    const timer = setInterval(sweep, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [ready, state.activeTrips, completeTrip]);
 
   const retryPending = useCallback(async (cardNo?: string): Promise<number> => {
     // Araçtaki (onboard) kayıtlar henüz tamamlanmadığı için gönderilmez

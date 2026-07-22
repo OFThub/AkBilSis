@@ -27,11 +27,18 @@ export interface ActiveTrip {
   busId: string;
   /** Plaka kayıtta ve arayüzde gösterilir — araç kimliği okunaklı olsun diye */
   busPlate: string;
-  /** Biniş anında aracın en yakın olduğu durak */
+  /** Binişin yapıldığı durak — araç o an bu durakta beklemekteydi */
   boardingStopIndex: number;
   boardTime: string; // ISO 8601 — kayda yazılan saat (demo modunda kaydırılmış olabilir)
   /** Kaydırılmamış gerçek biniş anı — yolculuk süresi buradan ölçülür */
   boardRealTime: string; // ISO 8601
+  /**
+   * Aracın son durağa varacağı **gerçek** an. Yolcu inmezse bu anda otomatik
+   * indirilir. Biniş anında tarifeden hesaplanıp saklanır: araç konumu duvar
+   * saatinden döngüsel türetildiği için "araç şu an son durakta mı" sorusu
+   * uygulama kapalıyken geçen turu ıskalar, damga ıskalamaz.
+   */
+  terminusRealTime: string; // ISO 8601
 }
 
 /**
