@@ -1,180 +1,141 @@
-import React, { useState } from "react";
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from "react-native";
-import { checkHealth } from "../api/client";
+import React, { useMemo } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useApp } from "../context/AppContext";
-import { colors, radius } from "../theme";
-import {
-  Header,
-  InfoBanner,
-  PrimaryButton,
-  SectionCard,
-  SectionTitle,
-} from "../components/UI";
+import { usePalette } from "../hooks/useTheme";
+import { useT } from "../i18n";
+import { Palette, radius } from "../theme";
+import { Header, PrimaryButton, SectionCard, SectionTitle } from "../components/UI";
+import { Language, ThemeMode } from "../types";
 
-const HOURS = Array.from({ length: 24 }, (_, i) => i);
-
+/**
+ * Ayarlar — **sunucuya hiçbir istek atmaz.**
+ *
+ * Tema ve dil yalnızca telefonda (AsyncStorage) saklanır. Bağlantı testi,
+ * sunucu adresi ve veri sıfırlama gibi geliştirici işlevleri bilinçli olarak
+ * yoktur; kullanıcıya dönük tek sunucu işlemi çıkıştır, o da yalnızca yerel
+ * oturumu siler.
+ */
 export default function SettingsScreen() {
   const app = useApp();
-  const [testResult, setTestResult] = useState<
-    { ok: boolean; text: string } | null
-  >(null);
-  const [testing, setTesting] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
+  const t = useT();
+  const palette = usePalette();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
 
-  async function handleTest() {
-    setTesting(true);
-    setTestResult(null);
-    const ok = await checkHealth();
-    setTesting(false);
-    setTestResult(
-      ok
-        ? { ok: true, text: "Bağlantı başarılı — izleme merkezi erişilebilir." }
-        : {
-            ok: false,
-            text: "Sunucuya ulaşılamadı. Backend'in çalıştığından ve .env dosyasındaki adresin doğru olduğundan emin olun.",
-          }
-    );
-  }
+  const themes: { value: ThemeMode; label: string }[] = [
+    { value: "light", label: t("themeLight") },
+    { value: "dark", label: t("themeDark") },
+  ];
 
-  function handleReset() {
-    if (!confirmReset) {
-      setConfirmReset(true);
-      return;
-    }
-    app.resetAll();
-    setConfirmReset(false);
-    setTestResult(null);
-  }
+  const languages: { value: Language; label: string }[] = [
+    { value: "tr", label: "Türkçe" },
+    { value: "en", label: "English" },
+  ];
 
   return (
     <View style={styles.root}>
-      <Header title="Ayarlar" subtitle="Bağlantı ve simülasyon" />
+      <Header title={t("settingsTitle")} subtitle={t("settingsSubtitle")} />
       <ScrollView contentContainerStyle={styles.content}>
         <SectionCard>
-          <SectionTitle>İzleme merkezi</SectionTitle>
-          <Text style={styles.hint}>
-            Sunucu adresi uygulamada tutulmaz; gizli .env dosyasından okunur ve
-            burada gösterilmez. Adresi değiştirmek için mobile/.env dosyasındaki
-            EXPO_PUBLIC_BACKEND_URL satırını düzenleyip uygulamayı
-            "npx expo start -c" ile yeniden başlatın.
-          </Text>
-          <View style={{ marginTop: 12 }}>
-            <PrimaryButton
-              label={testing ? "Deneniyor…" : "Bağlantıyı Test Et"}
-              onPress={handleTest}
-              disabled={testing}
-              tone="navy"
-            />
-          </View>
-          {testResult && (
-            <View style={{ marginTop: 12 }}>
-              <InfoBanner
-                tone={testResult.ok ? "success" : "error"}
-                text={testResult.text}
+          <SectionTitle>{t("appearance")}</SectionTitle>
+          <View style={styles.options}>
+            {themes.map((option) => (
+              <OptionChip
+                key={option.value}
+                label={option.label}
+                active={app.settings.theme === option.value}
+                styles={styles}
+                onPress={() => app.updateSettings({ theme: option.value })}
               />
-            </View>
-          )}
-        </SectionCard>
-
-        <SectionCard>
-          <View style={styles.switchRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.switchTitle}>Demo saat modu</Text>
-              <Text style={styles.hint}>
-                Biniş saatini elle seçin — grafiklerde farklı saatlere veri
-                üretmek için. Kapalıyken gerçek saat kullanılır.
-              </Text>
-            </View>
-            <Switch
-              value={app.settings.demoMode}
-              onValueChange={(value) => app.updateSettings({ demoMode: value })}
-              trackColor={{ true: colors.blue, false: colors.line }}
-              thumbColor="#ffffff"
-            />
+            ))}
           </View>
-          {app.settings.demoMode && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ marginTop: 12 }}
-              contentContainerStyle={styles.hourRow}
-            >
-              {HOURS.map((hour) => {
-                const active = app.settings.demoHour === hour;
-                return (
-                  <Pressable
-                    key={hour}
-                    onPress={() => app.updateSettings({ demoHour: hour })}
-                    style={[styles.hourChip, active && styles.hourChipActive]}
-                  >
-                    <Text
-                      style={[
-                        styles.hourText,
-                        active && styles.hourTextActive,
-                      ]}
-                    >
-                      {String(hour).padStart(2, "0")}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          )}
         </SectionCard>
 
         <SectionCard>
-          <SectionTitle>Uygulama</SectionTitle>
-          <PrimaryButton
-            label={
-              confirmReset
-                ? "Emin misiniz? Tekrar dokunun"
-                : "Uygulamayı Sıfırla"
-            }
-            onPress={handleReset}
-            tone="danger"
-          />
-          <Text style={styles.hint}>
-            Devam eden yolculuklar ve yolculuk geçmişi silinir. Kayıtlı
-            kullanıcılar, favori hatlar ve .env'deki sunucu adresi etkilenmez.
-          </Text>
+          <SectionTitle>{t("language")}</SectionTitle>
+          <View style={styles.options}>
+            {languages.map((option) => (
+              <OptionChip
+                key={option.value}
+                label={option.label}
+                active={app.settings.language === option.value}
+                styles={styles}
+                onPress={() => app.updateSettings({ language: option.value })}
+              />
+            ))}
+          </View>
         </SectionCard>
 
-        <Text style={styles.footer}>
-          Arnavutköy Belediyesi — Akbil Simülasyon Projesi
-        </Text>
+        <SectionCard>
+          <SectionTitle>{t("account")}</SectionTitle>
+          <Text style={styles.accountName}>{app.passenger?.full_name ?? "—"}</Text>
+          <Text style={styles.accountEmail}>{app.passenger?.email ?? ""}</Text>
+          <View style={{ marginTop: 14 }}>
+            <PrimaryButton label={t("logout")} onPress={app.logout} tone="danger" />
+          </View>
+        </SectionCard>
+
+        <Text style={styles.note}>{t("settingsNote")}</Text>
+        <Text style={styles.footer}>{t("municipality")}</Text>
       </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surface },
-  content: { padding: 16, paddingBottom: 28 },
-  hint: { fontSize: 12.5, color: colors.ink3, marginTop: 8, lineHeight: 17 },
-  switchRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  switchTitle: { fontSize: 15, fontWeight: "700", color: colors.ink },
-  hourRow: { gap: 8, paddingRight: 8 },
-  hourChip: {
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.control,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-  },
-  hourChipActive: { backgroundColor: colors.blue, borderColor: colors.blue },
-  hourText: { fontWeight: "700", color: colors.ink2, fontSize: 14 },
-  hourTextActive: { color: "#ffffff" },
-  footer: {
-    textAlign: "center",
-    color: colors.ink3,
-    fontSize: 12,
-    marginTop: 10,
-  },
-});
+function OptionChip({
+  label,
+  active,
+  styles,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  styles: ReturnType<typeof makeStyles>;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected: active }}
+      style={[styles.option, active && styles.optionActive]}
+    >
+      <Text style={[styles.optionLabel, active && styles.optionLabelActive]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function makeStyles(palette: Palette) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: palette.surface },
+    content: { padding: 16, paddingBottom: 28 },
+    options: { flexDirection: "row", gap: 10 },
+    option: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: palette.line,
+      borderRadius: radius.control,
+      paddingVertical: 13,
+      alignItems: "center",
+    },
+    optionActive: { borderColor: palette.blue, backgroundColor: palette.chipBlueBg },
+    optionLabel: { fontSize: 15, fontWeight: "700", color: palette.ink2 },
+    optionLabelActive: { color: palette.blue, fontWeight: "800" },
+    accountName: { fontSize: 16, fontWeight: "800", color: palette.ink },
+    accountEmail: { fontSize: 13, color: palette.ink3, marginTop: 3 },
+    note: {
+      fontSize: 12.5,
+      color: palette.ink3,
+      lineHeight: 18,
+      marginTop: 4,
+      textAlign: "center",
+    },
+    footer: {
+      textAlign: "center",
+      color: palette.ink3,
+      fontSize: 12,
+      marginTop: 14,
+    },
+  });
+}

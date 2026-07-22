@@ -1,10 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.deps import CurrentDevice, CurrentPassenger, DbSession, get_current_admin
+from app.config import settings
+from app.deps import ACCESS_COOKIE, CurrentPassenger, DbSession, get_current_admin
 from app.schemas import (
+    AnalyticsOverview,
     BusCreate,
+    BusLive,
     BusLocationUpdate,
     BusOccupancy,
     BusOccupancyDetail,
@@ -13,21 +16,27 @@ from app.schemas import (
     CardLinkRequest,
     CardRead,
     CardTokenResponse,
+    CardTypeShare,
+    CardTypeUpdate,
     DeviceBusAssign,
     DeviceCreate,
     DeviceCreated,
     DeviceRead,
     FavoriteCreate,
     FavoriteRead,
+    LineAnalytics,
     LineDetail,
     LineLiveStatus,
     LineRead,
     LoginRequest,
     PassengerRead,
     PassengerUpdate,
+    RecentTrip,
     RefreshRequest,
     RegisterRequest,
     StatsSummary,
+    StopAnalytics,
+    StopPair,
     StopRead,
     TokenPair,
     TripDetail,
@@ -65,9 +74,25 @@ def register(payload: RegisterRequest, db: DbSession):
 
 
 @auth_router.post("/login", response_model=TokenPair)
-def login(payload: LoginRequest, db: DbSession):
+def login(payload: LoginRequest, db: DbSession, response: Response):
     access, refresh = AuthService(db).login(payload.email, payload.password)
+    # Web sitesi token'ı JS'te tutmaz: httpOnly çerez hem XSS'e karşı korur hem
+    # de /admin sayfasının sunucuda doğrulanabilmesini sağlar. Mobil bu çerezi
+    # yok sayar, Authorization başlığıyla devam eder.
+    response.set_cookie(
+        key=ACCESS_COOKIE,
+        value=access,
+        httponly=True,
+        samesite="lax",
+        max_age=settings.access_token_expire_minutes * 60,
+        path="/",
+    )
     return TokenPair(access_token=access, refresh_token=refresh)
+
+
+@auth_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response):
+    response.delete_cookie(ACCESS_COOKIE, path="/")
 
 
 @auth_router.post("/refresh", response_model=TokenPair)
@@ -112,9 +137,10 @@ def get_line(line_id: uuid.UUID, db: DbSession):
     return TransitService(db).get_line(line_id)
 
 
-@transit_router.get("/lines/{line_id}/buses", response_model=list[BusRead])
+@transit_router.get("/lines/{line_id}/buses", response_model=list[BusLive])
 def line_buses(line_id: uuid.UUID, db: DbSession):
-    return TransitService(db).list_buses(line_id)
+    """Hattın canlı araç konumları — konum sunucuda hesaplanır."""
+    return TransitService(db).live_buses(line_id)
 
 
 @transit_router.get("/lines/{line_id}/live", response_model=LineLiveStatus)
@@ -159,7 +185,11 @@ def active_trip(passenger: CurrentPassenger, db: DbSession):
 
 @validation_router.post("", response_model=ValidateResponse)
 def validate(payload: ValidateRequest, passenger: CurrentPassenger, db: DbSession):
-    return ValidationService(db).validate(passenger, payload.bus_id, payload.stop_id)
+    """Kart bas: açık yolculuk yoksa biniş, varsa iniş.
+
+    Durak gönderilmez — aracın o anki konumundan sunucu belirler.
+    """
+    return ValidationService(db).validate(passenger, payload.bus_id)
 
 
 @admin_router.get("/passengers", response_model=list[PassengerRead])
@@ -245,6 +275,48 @@ def admin_occupancy_detail(bus_id: uuid.UUID, db: DbSession):
 @admin_router.get("/stats", response_model=StatsSummary)
 def admin_stats(db: DbSession):
     return StatsService(db).summary()
+
+
+@admin_router.patch("/cards/{card_id}/type", response_model=CardRead)
+def admin_set_card_type(card_id: uuid.UUID, payload: CardTypeUpdate, db: DbSession):
+    return CardService(db).set_type(card_id, payload.card_type)
+
+
+# ── Analitik ────────────────────────────────────────────────────────────────
+# Hepsi mobilden gelen gerçek Trip kayıtlarından hesaplanır. `load_level`
+# sunucuda üretilir; web yalnızca boyar.
+
+
+@admin_router.get("/analytics/overview", response_model=AnalyticsOverview)
+def admin_analytics_overview(db: DbSession):
+    return StatsService(db).overview()
+
+
+@admin_router.get("/analytics/lines", response_model=list[LineAnalytics])
+def admin_analytics_lines(db: DbSession):
+    """Hat başına yoğunluk ve sefer artır/azalt önerisi."""
+    return StatsService(db).line_analytics()
+
+
+@admin_router.get("/analytics/stops", response_model=list[StopAnalytics])
+def admin_analytics_stops(db: DbSession):
+    return StatsService(db).stop_analytics()
+
+
+@admin_router.get("/analytics/pairs", response_model=list[StopPair])
+def admin_analytics_pairs(db: DbSession):
+    """En yoğun güzergâhlar — hangi duraklar arası en çok yolculuk yapılıyor."""
+    return StatsService(db).stop_pairs()
+
+
+@admin_router.get("/analytics/card-types", response_model=list[CardTypeShare])
+def admin_analytics_card_types(db: DbSession):
+    return StatsService(db).card_type_shares()
+
+
+@admin_router.get("/trips", response_model=list[RecentTrip])
+def admin_recent_trips(db: DbSession, limit: int = Query(default=20, le=100)):
+    return StatsService(db).recent_trips(limit)
 
 
 @admin_router.post("/trips/{trip_id}/close", response_model=TripRead)

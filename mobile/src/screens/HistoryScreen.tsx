@@ -1,259 +1,188 @@
-import React, { useMemo, useState } from "react";
-import {
-  FlatList,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { useApp } from "../context/AppContext";
-import { colors, radius } from "../theme";
-import { hhmm, maskCardNo } from "../utils/format";
-import { Header, InfoBanner, PrimaryButton } from "../components/UI";
-import IdentityGate from "../components/IdentityGate";
-import { CardUser, TripRecord } from "../types";
+import React, { useEffect, useMemo, useState } from "react";
+import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { ApiError, api } from "../api/client";
+import { usePalette } from "../hooks/useTheme";
+import { TranslationKey, useT } from "../i18n";
+import { Palette, radius } from "../theme";
+import { durationMinutes, hhmm } from "../utils/format";
+import { Header, InfoBanner, LoadingBlock } from "../components/UI";
+import { Trip, TripStatus } from "../types";
+
+const STATUS_KEYS: Record<TripStatus, TranslationKey> = {
+  open: "statusOpen",
+  completed: "statusCompleted",
+  abandoned: "statusAbandoned",
+};
 
 /**
- * Geçmiş yalnızca kartını seçen kişiye açıktır: kimlik doğrulanmadan liste
- * hiç render edilmez, doğrulandıktan sonra da yalnızca o karta ait kayıtlar
- * gösterilir. Sekmeden çıkınca ekran unmount olduğu için kimlik düşer.
+ * Yolculuk geçmişi.
+ *
+ * Liste tamamen sunucudan gelir (`GET /trips`) ve yalnızca giriş yapan
+ * kullanıcının kayıtlarını içerir — uygulama geçmişi kendisi üretmez ve
+ * sunucuya geçmiş göndermez. Kayıt, iniş anında `/validate` ile zaten
+ * yazılmıştır; burada gönderilecek bir şey yoktur.
  */
 export default function HistoryScreen() {
-  const app = useApp();
-  const [user, setUser] = useState<CardUser | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  const t = useT();
+  const palette = usePalette();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
 
-  const records = useMemo(
-    () => (user ? app.history.filter((r) => r.cardNo === user.cardNo) : []),
-    [app.history, user]
-  );
-  const pendingCount = records.filter((r) => r.status === "pending").length;
+  const [trips, setTrips] = useState<Trip[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function handleRetry() {
-    if (!user) return;
-    setSending(true);
-    setNotice(null);
-    const sent = await app.retryPending(user.cardNo);
-    setSending(false);
-    setNotice(
-      sent > 0
-        ? `${sent} bekleyen kayıt izleme merkezine gönderildi.`
-        : "Sunucuya ulaşılamadı. Backend'in çalıştığını ve .env dosyasındaki adresi kontrol edin."
-    );
+  async function load() {
+    try {
+      setTrips(await api.trips(50));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Geçmiş alınamadı.");
+    }
   }
 
-  if (!user) {
+  useEffect(() => {
+    load().finally(() => setLoading(false));
+  }, []);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  if (loading) {
     return (
       <View style={styles.root}>
-        <Header title="Geçmiş" subtitle="Kullanıcı seçmeden görüntülenemez" />
-        <ScrollView contentContainerStyle={styles.content}>
-          <IdentityGate
-            title="Geçmişi görmek için kullanıcı seçin"
-            hint="Listeden kendinizi seçin. Yalnızca seçtiğiniz karta ait yolculuklar listelenir."
-            onIdentified={(identified) => {
-              setUser(identified);
-              setNotice(null);
-            }}
-          />
-        </ScrollView>
+        <Header title={t("historyTitle")} />
+        <LoadingBlock label={t("loading")} />
       </View>
     );
   }
 
   return (
     <View style={styles.root}>
-      <Header title="Geçmiş" subtitle={user.name} />
+      <Header title={t("historyTitle")} subtitle={t("historySubtitle")} />
       <FlatList
-        data={records}
-        keyExtractor={(item) => item.localId}
+        data={trips}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={styles.content}
-        ListHeaderComponent={
-          <>
-            <View style={styles.identity}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.identityName}>{user.name}</Text>
-                <Text style={styles.identityCard}>
-                  {maskCardNo(user.cardNo)} ·{" "}
-                  {user.cardType === "tam" ? "Tam" : "Öğrenci"}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => {
-                  setUser(null);
-                  setNotice(null);
-                }}
-                hitSlop={8}
-                style={({ pressed }) => [
-                  styles.identityBtn,
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <Text style={styles.identityBtnText}>Kimliği Bırak</Text>
-              </Pressable>
-            </View>
-            {notice && <InfoBanner tone="info" text={notice} />}
-            {pendingCount > 0 && (
-              <View style={styles.pendingBox}>
-                <Text style={styles.pendingText}>
-                  {pendingCount} kayıt gönderilmeyi bekliyor.
-                </Text>
-                <PrimaryButton
-                  label={sending ? "Gönderiliyor…" : "Bekleyenleri Gönder"}
-                  onPress={handleRetry}
-                  disabled={sending}
-                  tone="navy"
-                />
-              </View>
-            )}
-          </>
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
+        ListHeaderComponent={error ? <InfoBanner tone="error" text={error} /> : null}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>Bu kartla yolculuk yok</Text>
-            <Text style={styles.emptyText}>
-              Yolculuk ekranından bir otobüse binip indiğinizde kayıtlar burada
-              listelenir.
-            </Text>
+            <Text style={styles.emptyTitle}>{t("historyEmpty")}</Text>
+            <Text style={styles.emptyText}>{t("historyEmptyHint")}</Text>
           </View>
         }
-        renderItem={({ item }) => <TripRow record={item} />}
+        renderItem={({ item }) => <TripRow trip={item} styles={styles} />}
       />
     </View>
   );
 }
 
-function TripRow({ record }: { record: TripRecord }) {
-  // Biniş anında açılan kayıt: yolcu hâlâ araçta, iniş bilgisi henüz yok
-  const onboard = record.status === "onboard";
-  const statusStyle = onboard
-    ? styles.statusOnboard
-    : record.status === "sent"
-    ? styles.statusSent
-    : styles.statusPending;
-  const statusTextStyle = onboard
-    ? styles.statusTextOnboard
-    : record.status === "sent"
-    ? styles.statusTextSent
-    : styles.statusTextPending;
+function TripRow({
+  trip,
+  styles,
+}: {
+  trip: Trip;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const t = useT();
+  const onboard = trip.status === "open";
+
+  const statusStyle =
+    trip.status === "completed"
+      ? styles.statusCompleted
+      : trip.status === "abandoned"
+      ? styles.statusAbandoned
+      : styles.statusOnboard;
+
+  const statusTextStyle =
+    trip.status === "completed"
+      ? styles.statusTextCompleted
+      : trip.status === "abandoned"
+      ? styles.statusTextAbandoned
+      : styles.statusTextOnboard;
 
   return (
     <View style={[styles.row, onboard && styles.rowOnboard]}>
       <View style={styles.rowHeader}>
         <Text style={styles.time}>
-          {hhmm(record.boardTime)} –{" "}
-          {record.alightTime ? hhmm(record.alightTime) : "…"}
+          {hhmm(trip.boarded_at)} – {trip.alighted_at ? hhmm(trip.alighted_at) : "…"}
         </Text>
         <View style={[styles.statusChip, statusStyle]}>
           <Text style={[styles.statusText, statusTextStyle]}>
-            {onboard
-              ? "Otobüste"
-              : record.status === "sent"
-              ? "Gönderildi"
-              : "Bekliyor"}
+            {t(STATUS_KEYS[trip.status])}
           </Text>
         </View>
       </View>
-      <Text style={styles.line}>{record.line}</Text>
+      <Text style={styles.line}>{trip.line.name}</Text>
       <Text style={styles.route}>
-        {onboard
-          ? `${record.boardingStop} durağından bindi`
-          : `${record.boardingStop} → ${record.alightingStop} · ${record.durationMin} dk`}
+        {trip.alight_stop && trip.alighted_at
+          ? `${trip.board_stop.name} → ${trip.alight_stop.name} · ${durationMinutes(
+              trip.boarded_at,
+              trip.alighted_at
+            )} ${t("minutesShort")}`
+          : trip.board_stop.name}
       </Text>
-      <View style={styles.rowFooter}>
-        <Text style={styles.card}>
-          {record.busPlate ? `🚌 ${record.busPlate} · ` : ""}
-          {record.cardType === "tam" ? "Tam" : "Öğrenci"}
-        </Text>
-      </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surface },
-  content: { padding: 16, paddingBottom: 28, flexGrow: 1 },
-  identity: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: colors.chipBlueBg,
-    borderRadius: radius.card,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 14,
-  },
-  identityName: { fontSize: 15, fontWeight: "800", color: colors.navy900 },
-  identityCard: {
-    fontSize: 12.5,
-    color: colors.ink2,
-    fontWeight: "600",
-    marginTop: 2,
-  },
-  identityBtn: {
-    borderWidth: 1,
-    borderColor: colors.blue,
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  identityBtnText: { fontSize: 12.5, fontWeight: "700", color: colors.blue },
-  pendingBox: {
-    backgroundColor: colors.chipAmberBg,
-    borderRadius: radius.card,
-    padding: 14,
-    marginBottom: 14,
-    gap: 10,
-  },
-  pendingText: { color: "#8a5600", fontWeight: "700", fontSize: 13.5 },
-  empty: { alignItems: "center", paddingTop: 60, gap: 6 },
-  emptyTitle: { fontSize: 17, fontWeight: "800", color: colors.ink },
-  emptyText: {
-    fontSize: 13.5,
-    color: colors.ink2,
-    textAlign: "center",
-    maxWidth: 260,
-    lineHeight: 19,
-  },
-  row: {
-    backgroundColor: colors.card,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: 14,
-    marginBottom: 10,
-  },
-  rowOnboard: { borderColor: colors.blue, borderLeftWidth: 4 },
-  rowHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  time: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: colors.navy900,
-    fontVariant: ["tabular-nums"],
-  },
-  statusChip: {
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  statusSent: { backgroundColor: "#e5f3ec" },
-  statusPending: { backgroundColor: colors.chipAmberBg },
-  statusOnboard: { backgroundColor: colors.chipBlueBg },
-  statusText: { fontSize: 11.5, fontWeight: "700" },
-  statusTextSent: { color: colors.success },
-  statusTextPending: { color: "#8a5600" },
-  statusTextOnboard: { color: colors.blue },
-  line: { fontSize: 13.5, fontWeight: "700", color: colors.blue, marginTop: 8 },
-  route: { fontSize: 13.5, color: colors.ink2, marginTop: 3 },
-  rowFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 10,
-  },
-  card: { fontSize: 12.5, color: colors.ink3, fontWeight: "600" },
-});
+function makeStyles(palette: Palette) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: palette.surface },
+    content: { padding: 16, paddingBottom: 28, flexGrow: 1 },
+    empty: { alignItems: "center", paddingTop: 60, gap: 6 },
+    emptyTitle: { fontSize: 17, fontWeight: "800", color: palette.ink },
+    emptyText: {
+      fontSize: 13.5,
+      color: palette.ink2,
+      textAlign: "center",
+      maxWidth: 260,
+      lineHeight: 19,
+    },
+    row: {
+      backgroundColor: palette.card,
+      borderRadius: radius.card,
+      borderWidth: 1,
+      borderColor: palette.line,
+      padding: 14,
+      marginBottom: 10,
+    },
+    rowOnboard: { borderColor: palette.blue, borderLeftWidth: 4 },
+    rowHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    time: {
+      fontSize: 15,
+      fontWeight: "800",
+      color: palette.ink,
+      fontVariant: ["tabular-nums"],
+    },
+    statusChip: {
+      borderRadius: radius.pill,
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+    },
+    statusCompleted: { backgroundColor: palette.chipBlueBg },
+    statusAbandoned: { backgroundColor: palette.chipAmberBg },
+    statusOnboard: { backgroundColor: palette.chipBlueBg },
+    statusText: { fontSize: 11.5, fontWeight: "700" },
+    statusTextCompleted: { color: palette.success },
+    statusTextAbandoned: { color: palette.amber },
+    statusTextOnboard: { color: palette.blue },
+    line: {
+      fontSize: 13.5,
+      fontWeight: "700",
+      color: palette.blue,
+      marginTop: 8,
+    },
+    route: { fontSize: 13.5, color: palette.ink2, marginTop: 3 },
+  });
+}

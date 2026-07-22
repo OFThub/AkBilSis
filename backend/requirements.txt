@@ -1,0 +1,19 @@
+# Akbil Takip Sistemi — backend bağımlılıkları
+# Kurulum:  pip install -r requirements.txt
+#
+# Sürümler alt sınırla verildi: proje Python 3.14 ile çalışıyor ve yeni
+# yorumlayıcı için tekerlek (wheel) yalnızca güncel sürümlerde bulunuyor.
+
+fastapi>=0.115
+uvicorn[standard]>=0.34
+sqlalchemy>=2.0.36
+alembic>=1.14
+psycopg[binary]>=3.2.10
+pydantic>=2.10
+pydantic-settings>=2.7
+email-validator>=2.2
+python-jose[cryptography]>=3.3
+
+# passlib kullanılmıyor: 3.13'te kaldırılan `crypt` modülüne bağımlı.
+# core.py doğrudan bcrypt API'sini çağırır.
+bcrypt>=4.2

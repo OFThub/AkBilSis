@@ -64,6 +64,12 @@ class CardLinkRequest(BaseModel):
     nfc_uid: str = Field(min_length=4, max_length=32)
 
 
+class CardTypeUpdate(BaseModel):
+    """Tam/öğrenci statüsü yalnızca yönetici tarafından değiştirilir."""
+
+    card_type: CardType
+
+
 class CardTokenResponse(BaseModel):
     card_token: str
     expires_in: int
@@ -88,6 +94,10 @@ class LineRead(ORMModel):
     code: str
     name: str
     is_active: bool
+    #: Saat başına beklenen yoğunluk (24 eleman) — yolcuya gösterilen profil
+    hourly_profile: list[int] = []
+    #: hourly_profile'dan türetilen tepe saatler (ör. [8, 18])
+    peak_hours: list[int] = []
 
 
 class LineDetail(LineRead):
@@ -150,9 +160,28 @@ class LineLiveStatus(BaseModel):
     total_passengers: int
 
 
+class BusLive(BaseModel):
+    """Aracın canlı konumu — konum sunucuda hesaplanır, istemci taşımaz."""
+
+    id: uuid.UUID
+    plate: str
+    line_id: uuid.UUID
+    #: Durakta bekliyor — biniş ve iniş yalnızca bu sırada yapılabilir
+    at_stop: bool
+    #: Son durakta sefer bekliyor — yolcu alınmaz
+    layover: bool
+    #: Duraktaysa bulunduğu, yoldaysa en son ayrıldığı durak
+    current_stop: StopRead | None
+    #: Yaklaştığı durak
+    next_stop: StopRead | None
+    minutes_to_next: int
+    passenger_count: int
+
+
 class ValidateRequest(BaseModel):
+    """Durak gönderilmez: aracın o anki konumundan sunucu belirler."""
+
     bus_id: uuid.UUID
-    stop_id: uuid.UUID
 
 
 class ValidateResponse(BaseModel):
@@ -222,3 +251,71 @@ class StatsSummary(BaseModel):
     active_buses: int
     hourly: list[HourlyBoarding] = []
     top_stops: list[StopBoarding] = []
+
+
+# ── Yönetim analitiği ────────────────────────────────────────────────────────
+# `load_level` sunucuda hesaplanır ("low" | "normal" | "high"); web yalnızca
+# boyar. Eşikler app/simulation.py:load_level ve StatsService içinde tanımlıdır.
+
+class AnalyticsOverview(BaseModel):
+    total_trips: int
+    open_trips: int
+    completed_trips: int
+    abandoned_trips: int
+    active_buses: int
+    #: Şu an araçta olan yolcu sayısı (açık yolculuklar)
+    onboard_passengers: int
+    busiest_hour: int | None
+    hourly: list[HourlyBoarding] = []
+
+
+class LineAnalytics(BaseModel):
+    line_id: uuid.UUID
+    code: str
+    name: str
+    total_trips: int
+    #: Hattın gerçek kayıtlardan çıkan kendi zirve saati
+    peak_hour: int | None
+    peak_hour_trips: int
+    active_buses: int
+    #: Zirve saatte araç başına düşen yolcu — sefer kararının dayanağı
+    peak_per_bus: float
+    load_level: str
+    #: Admin'e dönük öneri metni ("Sefer artırılmalı" vb.)
+    recommendation: str
+
+
+class StopAnalytics(BaseModel):
+    stop_id: uuid.UUID
+    name: str
+    boardings: int
+    alightings: int
+    total: int
+    load_level: str
+
+
+class StopPair(BaseModel):
+    board_stop: str
+    alight_stop: str
+    count: int
+
+
+class CardTypeShare(BaseModel):
+    card_type: CardType
+    label: str
+    count: int
+
+
+class RecentTrip(BaseModel):
+    id: uuid.UUID
+    passenger_name: str | None
+    card_type: CardType
+    line_code: str
+    line_name: str
+    bus_plate: str
+    board_stop: str
+    alight_stop: str | None
+    boarded_at: datetime
+    alighted_at: datetime | None
+    duration_min: int | None
+    status: TripStatus

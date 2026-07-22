@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arnavutköy Akbil — Hesabım</title>
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <img src="assets/logo-2.png" alt="Arnavutköy Belediyesi" class="brand-logo" />
+      <div class="brand-text">
+        <h1>Arnavutköy Akbil</h1>
+        <p>Kartım ve hat yoğunlukları</p>
+      </div>
+      <nav class="topnav">
+        <a href="panel.html" class="is-current">Hesabım</a>
+        <!-- Yalnızca yönetici oturumunda görünür (js/auth.js) -->
+        <a href="/admin" id="adminLink" hidden>Yönetim</a>
+      </nav>
+      <div class="session-block">
+        <span id="sessionName" class="session-name">…</span>
+        <span id="clock" class="clock">--:--</span>
+        <button id="logoutBtn" class="ghost-btn" type="button">Çıkış</button>
+      </div>
+    </div>
+    <div class="route-ribbon" aria-hidden="true"></div>
+  </header>
+
+  <main class="container">
+    <section class="panel-top">
+      <!-- Sanal akbil kartı — mobil uygulamadaki kartla aynı görsel dil -->
+      <article class="akbil-card">
+        <img src="assets/logo.png" alt="" class="akbil-watermark" />
+        <div class="akbil-head">
+          <img src="assets/logo-2.png" alt="" class="akbil-brand" />
+          <span id="cardTypeBadge" class="akbil-badge">TAM</span>
+        </div>
+        <p id="cardHolder" class="akbil-holder">…</p>
+        <p id="cardNumber" class="akbil-number">•••• ••••</p>
+        <div class="akbil-foot">
+          <div>
+            <span class="akbil-stat-label">Yolculuk</span>
+            <span id="cardTripCount" class="akbil-stat-value">0</span>
+          </div>
+          <span class="akbil-mark">AKBİL</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <h2>Durum</h2>
+        <p class="card-sub">Hesabınız ve devam eden yolculuğunuz</p>
+        <dl class="detail-list">
+          <div><dt>Ad Soyad</dt><dd id="infoName">…</dd></div>
+          <div><dt>E-posta</dt><dd id="infoEmail">…</dd></div>
+          <div><dt>Kart durumu</dt><dd id="infoCardState">…</dd></div>
+          <div><dt>Favori hat</dt><dd id="infoFavorites">…</dd></div>
+        </dl>
+        <div id="activeTrip" class="active-trip" hidden>
+          <span class="active-trip-title">Şu an araçtasınız</span>
+          <p id="activeTripLine" class="active-trip-line"></p>
+          <p id="activeTripDetail" class="active-trip-detail"></p>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card wide">
+        <h2>Hatların yoğunluk saatleri</h2>
+        <p class="card-sub">
+          Bir hat seçin — gün içindeki beklenen yoğunluk ve en yoğun saatler
+        </p>
+        <div id="lineChips" class="line-chips"></div>
+        <p id="linePeaks" class="line-peaks"></p>
+        <div class="chart-box"><canvas id="lineHourlyChart" role="img" aria-label="Seçili hattın saatlik yoğunluk grafiği"></canvas></div>
+      </article>
+
+      <article class="card feed">
+        <h2>Son yolculuklarım</h2>
+        <p class="card-sub">Yalnızca sizin kayıtlarınız görünür</p>
+        <div class="table-wrap">
+          <table id="tripTable">
+            <thead>
+              <tr>
+                <th>Saat</th>
+                <th>Hat</th>
+                <th>Güzergâh</th>
+                <th>Süre</th>
+                <th>Durum</th>
+              </tr>
+            </thead>
+            <tbody id="tripBody"></tbody>
+          </table>
+          <p id="tripEmpty" class="empty" hidden>
+            Henüz yolculuk yok. Mobil uygulamadan bir otobüse bindiğinizde
+            kayıtlarınız burada listelenir.
+          </p>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Arnavutköy Belediyesi — Akbil Simülasyon Projesi</span>
+  </footer>
+
+  <script src="vendor/chart.umd.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/panel.js"></script>
+</body>
+</html>

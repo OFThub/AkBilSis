@@ -1,213 +1,207 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useApp } from "../context/AppContext";
-import {
-  LiveBus,
-  busLocationText,
-  busesForLine,
-  findBus,
-  passengerCounts,
-} from "../data/buses";
-import { BusLine, LINES, findLine } from "../data/lines";
-import { colors, radius } from "../theme";
+import { ApiError, api } from "../api/client";
+import { usePalette } from "../hooks/useTheme";
+import { useT } from "../i18n";
+import { Palette, radius } from "../theme";
 import { hhmm } from "../utils/format";
 import {
   Header,
   InfoBanner,
+  LoadingBlock,
   PrimaryButton,
   SectionCard,
   SectionTitle,
 } from "../components/UI";
-import IdentityGate from "../components/IdentityGate";
-import { CardUser } from "../types";
+import { Line, LineDetail, LiveBus, Trip } from "../types";
+
+/** Araç konumları sunucuda hesaplandığı için düzenli aralıkla tazelenir */
+const POLL_MS = 2000;
 
 type Notice = { tone: "info" | "error" | "success"; text: string } | null;
 
 /**
- * Yolculuk akışı üç durumludur:
- *  1. Kimlik yok  → kullanıcı listeden seçilir, başka hiçbir şey gösterilmez.
- *  2. Kimlik var, araçta değil → hat ve yoldaki araçlar; biniş durağı seçilmez,
- *     seçilen aracın anlık konumundan gelir.
- *  3. Kimlik var, araçta → yalnızca "Otobüsten İn". Başka araca binmek için
- *     arayüzde yol yoktur.
+ * Yolculuk akışı iki durumludur:
+ *  1. Araçta değil → hat ve yoldaki araçlar listelenir. Biniş durağı seçilmez;
+ *     sunucu, aracın o anki konumundan belirler.
+ *  2. Araçta → yalnızca "Otobüsten İn". Başka araca binmek için arayüzde yol
+ *     yoktur; sunucu da inmeden binişi "bırakılmış yolculuk" sayar.
  */
 export default function TripScreen() {
-  const app = useApp();
+  const t = useT();
+  const palette = usePalette();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
 
-  const [user, setUser] = useState<CardUser | null>(null);
-  const [selectedLineId, setSelectedLineId] = useState(LINES[0].id);
+  const [lines, setLines] = useState<Line[]>([]);
+  const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
+  const [lineDetail, setLineDetail] = useState<LineDetail | null>(null);
+  const [buses, setBuses] = useState<LiveBus[]>([]);
+  const [trip, setTrip] = useState<Trip | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
-  const [alighting, setAlighting] = useState(false);
-  // Araç konumları saatten hesaplandığı için ekranı saniyede bir tazeleriz
-  const [now, setNow] = useState(() => new Date());
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+  // Araçtayken o yolculuğun hattı, değilken seçili hat izlenir
+  const watchedLineId = trip ? trip.line.id : selectedLineId;
 
-  const trip = user ? app.activeTripFor(user.id) : undefined;
-  const tripLine = trip ? findLine(trip.lineId) : undefined;
-  const tripBus = trip ? findBus(trip.lineId, trip.busId, now) : undefined;
-  const selectedLine = findLine(selectedLineId)!;
-  const buses = useMemo(
-    () => busesForLine(selectedLine, now),
-    [selectedLine, now]
-  );
-  // Doluluk tahmini değil: o an araçta olan yolcuların sayısı
-  const counts = useMemo(
-    () => passengerCounts(app.activeTrips),
-    [app.activeTrips]
-  );
-
-  // Bant sayfanın üstünde, düğmeler listenin altında kalabildiği için sonuç
-  // mesajı gösterilirken en üste kaydırılır — aksi hâlde hata gözden kaçıyor
-  function showNotice(next: Exclude<Notice, null>) {
+  const showNotice = useCallback((next: Exclude<Notice, null>) => {
     setNotice(next);
     scrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, []);
+
+  // Açılış: hatlar ve varsa süren yolculuk
+  useEffect(() => {
+    (async () => {
+      try {
+        const [allLines, active] = await Promise.all([api.lines(), api.activeTrip()]);
+        setLines(allLines);
+        setTrip(active);
+        setSelectedLineId(active ? active.line.id : allLines[0]?.id ?? null);
+      } catch (err) {
+        setNotice({
+          tone: "error",
+          text: err instanceof ApiError ? err.message : "Hatlar yüklenemedi.",
+        });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // Hat şeması — hat değişince bir kez çekilir
+  useEffect(() => {
+    if (!watchedLineId) return;
+    let cancelled = false;
+    api
+      .lineDetail(watchedLineId)
+      .then((detail) => {
+        if (!cancelled) setLineDetail(detail);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [watchedLineId]);
+
+  // Canlı araç konumları — sunucudan düzenli aralıkla
+  useEffect(() => {
+    if (!watchedLineId) return;
+    let cancelled = false;
+
+    async function poll(lineId: string) {
+      try {
+        const live = await api.liveBuses(lineId);
+        if (!cancelled) setBuses(live);
+      } catch {
+        // Geçici ağ hatası ekranı bozmasın; bir sonraki tur yeniden dener
+      }
+    }
+
+    poll(watchedLineId);
+    const timer = setInterval(() => poll(watchedLineId), POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [watchedLineId]);
+
+  // Son durakta otomatik iniş sunucuda olur; ekran bunu yolculuğu tazeleyerek
+  // öğrenir, yoksa kullanıcı sonsuza dek "araçtasınız" görürdü
+  useEffect(() => {
+    if (!trip) return;
+    const timer = setInterval(() => {
+      api
+        .activeTrip()
+        .then(setTrip)
+        .catch(() => {});
+    }, POLL_MS * 3);
+    return () => clearInterval(timer);
+  }, [trip]);
+
+  /** Biniş ve iniş aynı uca gider — hangisi olduğunu sunucu söyler */
+  async function handleValidate(busId: string) {
+    if (working) return;
+    setWorking(true);
+    try {
+      const result = await api.validate(busId);
+      setTrip(await api.activeTrip());
+      showNotice({
+        tone: "success",
+        text:
+          result.action === "boarded"
+            ? `${result.stop_name} durağında ${result.line_code} hattına bindiniz.`
+            : `${result.stop_name} durağında indiniz. İyi günler!`,
+      });
+    } catch (err) {
+      showNotice({
+        tone: "error",
+        text: err instanceof ApiError ? err.message : "İşlem yapılamadı.",
+      });
+    } finally {
+      setWorking(false);
+    }
   }
 
-  function handleBoard(bus: LiveBus) {
-    if (!user) return;
-    const result = app.board(user.id, selectedLine.id, bus.id);
-    if (!result.ok) {
-      showNotice({ tone: "error", text: result.error ?? "Biniş yapılamadı." });
-      return;
-    }
-    showNotice({
-      tone: "success",
-      text: `${bus.plate} aracına bindiniz — ${selectedLine.name}. İyi yolculuklar!`,
-    });
-  }
+  const selectedLine = lines.find((l) => l.id === selectedLineId) ?? null;
+  const tripBus = trip ? buses.find((bus) => bus.id === trip.bus_id) : undefined;
 
-  async function handleAlight() {
-    if (!user || alighting) return;
-    setAlighting(true);
-    const result = await app.alight(user.id);
-    setAlighting(false);
-    if (!result.ok) {
-      showNotice({ tone: "error", text: result.error ?? "İniş yapılamadı." });
-      return;
-    }
-    const record = result.record!;
-    const base = `${user.name}, ${record.alightingStop} durağında indi — ${record.durationMin} dk.`;
-    showNotice(
-      result.sent
-        ? {
-            tone: "success",
-            text: `${base} Kayıt izleme merkezine gönderildi (${hhmm(
-              record.boardTime
-            )} – ${hhmm(record.alightTime)}).`,
-          }
-        : {
-            tone: "info",
-            text: `${base} Sunucuya ulaşılamadı — Geçmiş ekranından tekrar gönderebilirsiniz.`,
-          }
+  if (loading) {
+    return (
+      <View style={styles.root}>
+        <Header title={t("tripTitle")} />
+        <LoadingBlock label={t("loading")} />
+      </View>
     );
   }
 
   return (
     <View style={styles.root}>
       <Header
-        title="Yolculuk"
-        subtitle={user ? user.name : "Kullanıcı seçmeden hat seçilemez"}
+        title={t("tripTitle")}
+        subtitle={trip ? trip.line.name : selectedLine?.name}
       />
       <ScrollView ref={scrollRef} contentContainerStyle={styles.content}>
         {notice && <InfoBanner tone={notice.tone} text={notice.text} />}
 
-        {!user && (
-          <IdentityGate
-            title="Önce kullanıcı seçin"
-            hint="Kayıtlı kullanıcı listesinden kendinizi seçin. Hat ve araç listesi seçimden sonra açılır."
-            onIdentified={(identified) => {
-              setUser(identified);
-              setNotice(null);
-            }}
-          />
-        )}
-
-        {user && (
-          <IdentityStrip
-            user={user}
-            onRelease={() => {
-              setUser(null);
-              setNotice(null);
-            }}
-          />
-        )}
-
         {/* ── ARAÇTA: yalnızca iniş ── */}
-        {user && trip && tripLine && (
+        {trip ? (
           <>
             <View style={styles.tripBanner}>
-              <Text style={styles.tripBannerTitle}>Araçtasınız</Text>
-              <Text style={styles.tripBannerLine}>{tripLine.name}</Text>
+              <Text style={styles.tripBannerTitle}>{t("onboard")}</Text>
+              <Text style={styles.tripBannerLine}>{trip.line.name}</Text>
               <Text style={styles.tripBannerDetail}>
-                {trip.busPlate} · Biniş:{" "}
-                {tripLine.stops[trip.boardingStopIndex]} · {hhmm(trip.boardTime)}
-              </Text>
-              <Text style={styles.tripBannerNote}>
-                {tripBus
-                  ? `Şu an: ${busLocationText(tripBus, tripLine)}`
-                  : "Araç konumu alınamıyor."}
-              </Text>
-              <Text style={styles.tripBannerNote}>
-                Araçta {counts[trip.busId] ?? 1} yolcu var (siz dâhil).
+                {trip.board_stop.name} · {hhmm(trip.boarded_at)}
               </Text>
             </View>
 
             <SectionCard>
-              <SectionTitle>İniş</SectionTitle>
-              <Text style={styles.alightInfo}>
-                {tripBus?.atStop
-                  ? "Otobüs durakta — şimdi inebilirsiniz. İneceğiniz durağı seçmenize gerek yok, kayda bu durak yazılır:"
-                  : "Otobüs duraklar arasında. İnmek için bir sonraki durağa varmasını bekleyin:"}
-              </Text>
+              <SectionTitle>{t("alightAction")}</SectionTitle>
               <Text style={styles.alightStop}>
-                {tripBus
-                  ? tripLine.stops[
-                      tripBus.atStop ? tripBus.fromIndex : tripBus.toIndex
-                    ]
-                  : "—"}
+                {tripBus?.at_stop
+                  ? tripBus.current_stop?.name ?? "—"
+                  : tripBus?.next_stop?.name ?? "—"}
               </Text>
               <PrimaryButton
                 label={
-                  alighting
-                    ? "İniliyor…"
-                    : tripBus?.atStop
-                    ? "Otobüsten İn"
-                    : "Durak bekleniyor…"
+                  working
+                    ? t("pleaseWait")
+                    : tripBus?.at_stop
+                    ? t("alightAction")
+                    : t("waitingForStop")
                 }
-                onPress={handleAlight}
-                disabled={alighting || !tripBus?.atStop}
+                onPress={() => tripBus && handleValidate(tripBus.id)}
+                disabled={working || !tripBus?.at_stop}
               />
-              <Text style={styles.hint}>
-                İnmeden başka bir araca binemezsiniz. Yolculuğunuz binerken
-                Geçmiş'e "Otobüste" olarak yazıldı; inince tamamlanır. İnmezseniz
-                otobüs son durağa varınca ({tripLine.stops[tripLine.stops.length - 1]})
-                otomatik indirilirsiniz.
-              </Text>
-            </SectionCard>
-
-            <SectionCard>
-              <SectionTitle>{tripLine.code} hat şeması</SectionTitle>
-              <StopRail
-                line={tripLine}
-                buses={tripBus ? [tripBus] : []}
-                highlightIndex={trip.boardingStopIndex}
-              />
+              <Text style={styles.hint}>{t("alightHint")}</Text>
             </SectionCard>
           </>
-        )}
-
-        {/* ── ARAÇTA DEĞİL: hat + yoldaki araçlar ── */}
-        {user && !trip && (
+        ) : (
           <>
             <SectionCard>
-              <SectionTitle>Hat seçin</SectionTitle>
+              <SectionTitle>{t("selectLine")}</SectionTitle>
               <View style={styles.lineChips}>
-                {LINES.map((line) => {
+                {lines.map((line) => {
                   const active = line.id === selectedLineId;
                   return (
                     <Pressable
@@ -216,18 +210,12 @@ export default function TripScreen() {
                       style={[styles.lineChip, active && styles.lineChipActive]}
                     >
                       <Text
-                        style={[
-                          styles.lineChipCode,
-                          active && styles.lineChipCodeActive,
-                        ]}
+                        style={[styles.lineChipCode, active && styles.lineChipCodeActive]}
                       >
                         {line.code}
                       </Text>
                       <Text
-                        style={[
-                          styles.lineChipName,
-                          active && styles.lineChipNameActive,
-                        ]}
+                        style={[styles.lineChipName, active && styles.lineChipNameActive]}
                         numberOfLines={1}
                       >
                         {line.name.replace(`${line.code} `, "")}
@@ -239,110 +227,89 @@ export default function TripScreen() {
             </SectionCard>
 
             <SectionCard>
-              <SectionTitle>Yoldaki otobüsler</SectionTitle>
-              {buses.map((bus) => (
-                <BusCard
-                  key={bus.id}
-                  bus={bus}
-                  line={selectedLine}
-                  passengers={counts[bus.id] ?? 0}
-                  onBoard={() => handleBoard(bus)}
-                />
-              ))}
-              <Text style={styles.hint}>
-                Konumlar canlıdır. Yalnızca durakta bekleyen otobüse
-                binebilirsiniz; biniş durağınız o duraktır, ayrıca durak
-                seçmezsiniz.
-              </Text>
+              <SectionTitle>{t("busesOnRoute")}</SectionTitle>
+              {buses.length === 0 ? (
+                <Text style={styles.hint}>{t("noBuses")}</Text>
+              ) : (
+                buses.map((bus) => (
+                  <BusCard
+                    key={bus.id}
+                    bus={bus}
+                    styles={styles}
+                    disabled={working}
+                    onBoard={() => handleValidate(bus.id)}
+                  />
+                ))
+              )}
+              <Text style={styles.hint}>{t("tripHint")}</Text>
             </SectionCard>
-
-            <SectionCard>
-              <SectionTitle>{selectedLine.code} hat şeması</SectionTitle>
-              <StopRail line={selectedLine} buses={buses} />
-            </SectionCard>
-
           </>
+        )}
+
+        {lineDetail && (
+          <SectionCard>
+            <SectionTitle>
+              {lineDetail.code} {t("lineDiagram")}
+            </SectionTitle>
+            <StopRail
+              detail={lineDetail}
+              buses={trip ? (tripBus ? [tripBus] : []) : buses}
+              boardingStopId={trip?.board_stop.id}
+              styles={styles}
+            />
+          </SectionCard>
         )}
       </ScrollView>
     </View>
   );
 }
 
-/** Doğrulanmış kimlik şeridi — kimin adına işlem yapıldığı hep görünür */
-function IdentityStrip({
-  user,
-  onRelease,
-}: {
-  user: CardUser;
-  onRelease: () => void;
-}) {
-  return (
-    <View style={styles.identity}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.identityName}>{user.name}</Text>
-        <Text style={styles.identityCard}>
-          {user.cardNo} · {user.cardType === "tam" ? "Tam" : "Öğrenci"}
-        </Text>
-      </View>
-      <Pressable
-        onPress={onRelease}
-        hitSlop={8}
-        style={({ pressed }) => [styles.identityBtn, pressed && { opacity: 0.7 }]}
-      >
-        <Text style={styles.identityBtnText}>Kimliği Bırak</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-/** Yoldaki tek araç — plaka, canlı konum, içindeki yolcu sayısı ve biniş düğmesi */
+/** Yoldaki tek araç — plaka, canlı konum, yolcu sayısı ve biniş düğmesi */
 function BusCard({
   bus,
-  line,
-  passengers,
+  styles,
+  disabled,
   onBoard,
 }: {
   bus: LiveBus;
-  line: BusLine;
-  passengers: number;
+  styles: ReturnType<typeof makeStyles>;
+  disabled: boolean;
   onBoard: () => void;
 }) {
-  // Doluluk, araçtaki açık yolculuk kayıtlarından gelir — tahmin yok
-  const occStyle =
-    passengers === 0
-      ? styles.occLow
-      : passengers < 3
-      ? styles.occMid
-      : styles.occHigh;
-  const occTextStyle =
-    passengers === 0
-      ? styles.occTextLow
-      : passengers < 3
-      ? styles.occTextMid
-      : styles.occTextHigh;
+  const t = useT();
+
+  const location = bus.layover
+    ? `${t("layoverLabel")} — ${bus.minutes_to_next} ${t("minutesShort")}`
+    : bus.at_stop
+    ? `${bus.current_stop?.name ?? "—"} ${t("atStopSuffix")}`
+    : `${bus.current_stop?.name ?? "—"} → ${bus.next_stop?.name ?? "—"} · ${
+        bus.minutes_to_next
+      } ${t("minutesShort")}`;
 
   return (
-    <View style={[styles.busCard, !bus.atStop && styles.busCardIdle]}>
+    <View style={[styles.busCard, !bus.at_stop && styles.busCardIdle]}>
       <View style={styles.busTop}>
         <Text style={styles.busPlate}>🚌 {bus.plate}</Text>
-        <View style={[styles.occChip, occStyle]}>
-          <Text style={[styles.occText, occTextStyle]}>
-            {passengers === 0 ? "Boş" : `${passengers} yolcu`}
+        <View style={styles.occChip}>
+          <Text style={styles.occText}>
+            {bus.passenger_count === 0
+              ? t("emptyBus")
+              : `${bus.passenger_count} ${t("passengersAboard")}`}
           </Text>
         </View>
       </View>
-      <Text style={styles.busWhere}>{busLocationText(bus, line)}</Text>
+      <Text style={styles.busWhere}>{location}</Text>
       {/* Biniş yalnızca araç durakta beklerken açıktır */}
       <PrimaryButton
         label={
           bus.layover
-            ? "Sefer bekliyor"
-            : bus.atStop
-            ? "Bin"
-            : `${bus.minutesToNext} dk sonra ${line.stops[bus.toIndex]}`
+            ? t("layoverLabel")
+            : bus.at_stop
+            ? t("boardAction")
+            : `${bus.minutes_to_next} ${t("minutesShort")} · ${bus.next_stop?.name ?? ""}`
         }
         onPress={onBoard}
-        disabled={!bus.atStop}
+        disabled={disabled || !bus.at_stop}
       />
     </View>
   );
@@ -350,33 +317,41 @@ function BusCard({
 
 /** Hat şeması: duraklar + araçların canlı konum işaretleri */
 function StopRail({
-  line,
+  detail,
   buses,
-  highlightIndex,
+  boardingStopId,
+  styles,
 }: {
-  line: BusLine;
+  detail: LineDetail;
   buses: LiveBus[];
-  highlightIndex?: number;
+  boardingStopId?: string;
+  styles: ReturnType<typeof makeStyles>;
 }) {
+  const t = useT();
+  // Sunucu her iki yönü de döndürür; şemada gidiş yönü gösterilir
+  const stops = detail.line_stops
+    .filter((entry) => entry.direction === "forward")
+    .sort((a, b) => a.sequence - b.sequence);
+
   return (
     <View>
-      {line.stops.map((stop, idx) => {
+      {stops.map((entry, index) => {
         const atStop = buses.filter(
-          (bus) => bus.atStop && bus.fromIndex === idx
+          (bus) => bus.at_stop && bus.current_stop?.id === entry.stop.id
         );
-        // Duraktan ayrılmış, bir sonrakine gidiyor → iki durak arasına çizilir
         const onSegment = buses.filter(
-          (bus) => !bus.atStop && !bus.layover && bus.fromIndex === idx
+          (bus) => !bus.at_stop && !bus.layover && bus.current_stop?.id === entry.stop.id
         );
-        const isBoarding = highlightIndex === idx;
+        const isBoarding = boardingStopId === entry.stop.id;
+
         return (
-          <View key={stop}>
+          <View key={entry.stop.id}>
             <View style={styles.stopRow}>
               <View style={styles.stopRail}>
                 <View
                   style={[
                     styles.railSegment,
-                    idx === 0 && { backgroundColor: "transparent" },
+                    index === 0 && { backgroundColor: "transparent" },
                   ]}
                 />
                 <View
@@ -389,30 +364,31 @@ function StopRail({
                 <View
                   style={[
                     styles.railSegment,
-                    idx === line.stops.length - 1 && {
-                      backgroundColor: "transparent",
-                    },
+                    index === stops.length - 1 && { backgroundColor: "transparent" },
                   ]}
                 />
               </View>
-              <Text
-                style={[styles.stopName, isBoarding && styles.stopNameSelected]}
-              >
-                {stop}
+              <Text style={[styles.stopName, isBoarding && styles.stopNameSelected]}>
+                {entry.stop.name}
               </Text>
               {isBoarding ? (
-                <Text style={styles.stopNote}>Bindiğiniz durak</Text>
+                <Text style={styles.stopNote}>{t("boardingStop")}</Text>
               ) : null}
             </View>
             {atStop.map((bus) => (
-              <BusMarker key={bus.id} text={`${bus.plate} · durakta`} />
+              <BusMarker
+                key={bus.id}
+                text={`${bus.plate} · ${t("atStopSuffix")}`}
+                styles={styles}
+              />
             ))}
             {onSegment.map((bus) => (
               <BusMarker
                 key={bus.id}
-                text={`${bus.plate} · ${bus.minutesToNext} dk sonra ${
-                  line.stops[bus.toIndex]
+                text={`${bus.plate} · ${bus.minutes_to_next} ${t("minutesShort")} → ${
+                  bus.next_stop?.name ?? ""
                 }`}
+                styles={styles}
               />
             ))}
           </View>
@@ -422,7 +398,13 @@ function StopRail({
   );
 }
 
-function BusMarker({ text }: { text: string }) {
+function BusMarker({
+  text,
+  styles,
+}: {
+  text: string;
+  styles: ReturnType<typeof makeStyles>;
+}) {
   return (
     <View style={styles.busMarkerRow}>
       <View style={styles.busMarkerRail}>
@@ -433,155 +415,123 @@ function BusMarker({ text }: { text: string }) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surface },
-  content: { padding: 16, paddingBottom: 28 },
-  identity: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: colors.chipBlueBg,
-    borderRadius: radius.card,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 14,
-  },
-  identityName: { fontSize: 15, fontWeight: "800", color: colors.navy900 },
-  identityCard: {
-    fontSize: 12.5,
-    color: colors.ink2,
-    fontWeight: "600",
-    marginTop: 2,
-    fontVariant: ["tabular-nums"],
-  },
-  identityBtn: {
-    borderWidth: 1,
-    borderColor: colors.blue,
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  identityBtnText: { fontSize: 12.5, fontWeight: "700", color: colors.blue },
-  lineChips: { gap: 8 },
-  lineChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.control,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  lineChipActive: { borderColor: colors.blue, backgroundColor: colors.chipBlueBg },
-  lineChipCode: {
-    fontWeight: "800",
-    fontSize: 13,
-    color: colors.ink2,
-    backgroundColor: colors.surface,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    overflow: "hidden",
-  },
-  lineChipCodeActive: { backgroundColor: colors.blue, color: "#ffffff" },
-  lineChipName: { flex: 1, fontSize: 14, color: colors.ink2, fontWeight: "600" },
-  lineChipNameActive: { color: colors.navy900 },
-  busCard: {
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.control,
-    padding: 12,
-    marginBottom: 10,
-    gap: 8,
-  },
-  busCardIdle: { backgroundColor: colors.surface, opacity: 0.75 },
-  busTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  busPlate: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: colors.navy900,
-    letterSpacing: 0.5,
-  },
-  busWhere: { fontSize: 13.5, color: colors.ink2, fontWeight: "600" },
-  occChip: {
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  occLow: { backgroundColor: "#e5f3ec" },
-  occMid: { backgroundColor: colors.chipBlueBg },
-  occHigh: { backgroundColor: colors.chipAmberBg },
-  occText: { fontSize: 11.5, fontWeight: "800" },
-  occTextLow: { color: colors.success },
-  occTextMid: { color: colors.blue },
-  occTextHigh: { color: "#8a5600" },
-  stopRow: { flexDirection: "row", alignItems: "center", paddingRight: 10 },
-  stopRail: { width: 34, alignItems: "center", alignSelf: "stretch" },
-  railSegment: { flex: 1, width: 2, backgroundColor: colors.line },
-  stopDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 3,
-    borderColor: colors.ink3,
-    backgroundColor: "#ffffff",
-    marginVertical: 2,
-  },
-  stopDotBus: { borderColor: colors.accent, backgroundColor: colors.accent },
-  stopDotHighlight: { borderColor: colors.blue, backgroundColor: colors.blue },
-  stopName: {
-    flex: 1,
-    fontSize: 15,
-    color: colors.ink,
-    fontWeight: "600",
-    paddingVertical: 11,
-  },
-  stopNameSelected: { color: colors.navy900, fontWeight: "800" },
-  stopNote: { fontSize: 12, color: colors.blue, fontWeight: "700" },
-  busMarkerRow: { flexDirection: "row", alignItems: "center" },
-  busMarkerRail: { width: 34, alignItems: "center" },
-  busMarkerIcon: { fontSize: 15 },
-  busMarkerText: {
-    flex: 1,
-    fontSize: 12.5,
-    color: colors.amber,
-    fontWeight: "700",
-  },
-  alightInfo: { fontSize: 13.5, color: colors.ink2, lineHeight: 19 },
-  alightStop: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: colors.navy900,
-    marginTop: 6,
-    marginBottom: 12,
-  },
-  hint: { fontSize: 12.5, color: colors.ink3, lineHeight: 17, marginTop: 10 },
-  tripBanner: {
-    backgroundColor: colors.navy900,
-    borderRadius: radius.card,
-    padding: 18,
-    marginBottom: 14,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.accent,
-  },
-  tripBannerTitle: {
-    color: colors.accent,
-    fontWeight: "800",
-    fontSize: 12,
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-  },
-  tripBannerLine: {
-    color: "#ffffff",
-    fontSize: 17,
-    fontWeight: "800",
-    marginTop: 6,
-  },
-  tripBannerDetail: { color: "#b9c3de", fontSize: 13.5, marginTop: 4 },
-  tripBannerNote: { color: colors.accent, fontSize: 12.5, marginTop: 8 },
-});
+function makeStyles(palette: Palette) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: palette.surface },
+    content: { padding: 16, paddingBottom: 28 },
+    lineChips: { gap: 8 },
+    lineChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      borderWidth: 1,
+      borderColor: palette.line,
+      borderRadius: radius.control,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    lineChipActive: { borderColor: palette.blue, backgroundColor: palette.chipBlueBg },
+    lineChipCode: {
+      fontWeight: "800",
+      fontSize: 13,
+      color: palette.ink2,
+      backgroundColor: palette.surface,
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      overflow: "hidden",
+    },
+    lineChipCodeActive: { backgroundColor: palette.blue, color: "#ffffff" },
+    lineChipName: { flex: 1, fontSize: 14, color: palette.ink2, fontWeight: "600" },
+    lineChipNameActive: { color: palette.ink, fontWeight: "700" },
+    busCard: {
+      borderWidth: 1,
+      borderColor: palette.line,
+      borderRadius: radius.control,
+      padding: 12,
+      marginBottom: 10,
+      gap: 8,
+    },
+    busCardIdle: { backgroundColor: palette.surface, opacity: 0.75 },
+    busTop: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    busPlate: {
+      fontSize: 15,
+      fontWeight: "800",
+      color: palette.ink,
+      letterSpacing: 0.5,
+    },
+    busWhere: { fontSize: 13.5, color: palette.ink2, fontWeight: "600" },
+    occChip: {
+      borderRadius: radius.pill,
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+      backgroundColor: palette.chipBlueBg,
+    },
+    occText: { fontSize: 11.5, fontWeight: "800", color: palette.blue },
+    stopRow: { flexDirection: "row", alignItems: "center", paddingRight: 10 },
+    stopRail: { width: 34, alignItems: "center", alignSelf: "stretch" },
+    railSegment: { flex: 1, width: 2, backgroundColor: palette.line },
+    stopDot: {
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      borderWidth: 3,
+      borderColor: palette.ink3,
+      backgroundColor: palette.card,
+      marginVertical: 2,
+    },
+    stopDotBus: { borderColor: palette.accent, backgroundColor: palette.accent },
+    stopDotHighlight: { borderColor: palette.blue, backgroundColor: palette.blue },
+    stopName: {
+      flex: 1,
+      fontSize: 15,
+      color: palette.ink,
+      fontWeight: "600",
+      paddingVertical: 11,
+    },
+    stopNameSelected: { fontWeight: "800" },
+    stopNote: { fontSize: 12, color: palette.blue, fontWeight: "700" },
+    busMarkerRow: { flexDirection: "row", alignItems: "center" },
+    busMarkerRail: { width: 34, alignItems: "center" },
+    busMarkerIcon: { fontSize: 15 },
+    busMarkerText: {
+      flex: 1,
+      fontSize: 12.5,
+      color: palette.amber,
+      fontWeight: "700",
+    },
+    alightStop: {
+      fontSize: 18,
+      fontWeight: "800",
+      color: palette.ink,
+      marginBottom: 12,
+    },
+    hint: { fontSize: 12.5, color: palette.ink3, lineHeight: 17, marginTop: 10 },
+    tripBanner: {
+      backgroundColor: palette.navy900,
+      borderRadius: radius.card,
+      padding: 18,
+      marginBottom: 14,
+      borderLeftWidth: 4,
+      borderLeftColor: palette.accent,
+    },
+    tripBannerTitle: {
+      color: palette.accent,
+      fontWeight: "800",
+      fontSize: 12,
+      letterSpacing: 1.4,
+      textTransform: "uppercase",
+    },
+    tripBannerLine: {
+      color: palette.onNavy,
+      fontSize: 17,
+      fontWeight: "800",
+      marginTop: 6,
+    },
+    tripBannerDetail: { color: palette.onNavyMuted, fontSize: 13.5, marginTop: 4 },
+  });
+}

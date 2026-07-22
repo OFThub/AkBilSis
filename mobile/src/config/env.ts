@@ -8,14 +8,13 @@
  * `npx expo start -c`.
  */
 
-/** İzleme merkezi (backend) adresi — uygulama arayüzünde hiçbir yerde gösterilmez */
-export const BACKEND_URL =
-  process.env.EXPO_PUBLIC_BACKEND_URL?.trim() || "http://localhost:4000";
-
 /**
- * Otobüs simülasyonu hız çarpanı: 10 → gerçek 30 sn ≈ 5 dk yolculuk.
- * Geçersiz/0 değerde 10'a düşer, aksi hâlde otobüsler hiç hareket etmez.
+ * Backend adresi — uygulama arayüzünde hiçbir yerde gösterilmez ve
+ * değiştirilemez. Telefonla test ederken bilgisayarın ağ adresi yazılmalıdır;
+ * telefondaki "localhost" telefonun kendisidir.
+ *
+ * Otobüs simülasyonu artık sunucuda çalışır (backend/app/simulation.py), bu
+ * yüzden uygulamada hız çarpanı gibi bir ayar yoktur.
  */
-const rawSimSpeed = Number(process.env.EXPO_PUBLIC_SIM_SPEED);
-export const SIM_SPEED =
-  Number.isFinite(rawSimSpeed) && rawSimSpeed > 0 ? rawSimSpeed : 10;
+export const BACKEND_URL =
+  process.env.EXPO_PUBLIC_BACKEND_URL?.trim() || "http://localhost:8000";

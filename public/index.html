@@ -3,108 +3,137 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Akbil İzleme Merkezi — Arnavutköy Belediyesi</title>
+  <title>Arnavutköy Akbil — Giriş</title>
   <link rel="icon" type="image/png" href="assets/logo.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <img src="assets/logo-2.png" alt="Arnavutköy Belediyesi" class="brand-logo" />
-      <div class="brand-text">
-        <h1>Akbil İzleme Merkezi</h1>
-        <p>Toplu ulaşım kart kullanım verileri</p>
-      </div>
-      <div class="live-block">
-        <span id="liveBadge" class="live-badge"><span class="live-dot" aria-hidden="true"></span><span id="liveText">Canlı</span></span>
-        <span id="clock" class="clock">--:--</span>
-      </div>
-    </div>
-    <div class="route-ribbon" aria-hidden="true"></div>
-  </header>
-
-  <main class="container">
-    <section class="tiles" aria-label="Özet göstergeler">
-      <div class="tile">
-        <span class="tile-label">Toplam yolculuk</span>
-        <span class="tile-value" id="tileTrips">0</span>
-      </div>
-      <div class="tile">
-        <span class="tile-label">Toplam gelir</span>
-        <span class="tile-value" id="tileRevenue">₺0,00</span>
-      </div>
-      <div class="tile">
-        <span class="tile-label">Ortalama yolculuk süresi</span>
-        <span class="tile-value" id="tileDuration">0 dk</span>
-      </div>
-      <div class="tile">
-        <span class="tile-label">En yoğun saat</span>
-        <span class="tile-value" id="tileBusyHour">—</span>
-      </div>
+<body class="auth-body">
+  <main class="auth-shell">
+    <section class="auth-brand">
+      <img src="assets/logo.png" alt="" class="auth-crest" />
+      <h1>Arnavutköy Akbil</h1>
+      <p>
+        Toplu ulaşım kartınızı, yolculuk geçmişinizi ve hatların yoğunluk
+        saatlerini tek yerden görün.
+      </p>
+      <ul class="auth-points">
+        <li>Kart bilgileriniz ve favori hatlarınız</li>
+        <li>Tüm hatların saat saat yoğunluğu</li>
+        <li>Mobil uygulamayla aynı hesap</li>
+      </ul>
     </section>
 
-    <section class="grid">
-      <article class="card wide">
-        <h2>Saatlik yoğunluk</h2>
-        <p class="card-sub">Saat başına biniş sayısı</p>
-        <div class="chart-box"><canvas id="hourlyChart" role="img" aria-label="Saat başına biniş sayısı çubuk grafiği"></canvas></div>
-      </article>
+    <section class="auth-panel">
+      <div class="auth-tabs" role="tablist">
+        <button id="tabLogin" class="auth-tab is-active" role="tab" aria-selected="true">
+          Giriş Yap
+        </button>
+        <button id="tabRegister" class="auth-tab" role="tab" aria-selected="false">
+          Kayıt Ol
+        </button>
+      </div>
 
-      <article class="card">
-        <h2>Hat kullanımı</h2>
-        <p class="card-sub">Hangi otobüsler daha sık kullanıldı</p>
-        <div class="chart-box"><canvas id="linesChart" role="img" aria-label="Hat başına yolculuk sayısı çubuk grafiği"></canvas></div>
-      </article>
+      <p id="authMessage" class="auth-message" hidden></p>
 
-      <article class="card">
-        <h2>En çok kullanılan duraklar</h2>
-        <p class="card-sub">Biniş + iniş toplamı</p>
-        <div class="chart-box"><canvas id="stopsChart" role="img" aria-label="Durak başına kullanım çubuk grafiği"></canvas></div>
-      </article>
+      <form id="loginForm" class="auth-form">
+        <label class="field">
+          <span>E-posta</span>
+          <input type="email" name="email" autocomplete="email" required />
+        </label>
+        <label class="field">
+          <span>Şifre</span>
+          <input type="password" name="password" autocomplete="current-password" required />
+        </label>
+        <button type="submit" class="btn-primary">Giriş Yap</button>
+      </form>
 
-      <article class="card">
-        <h2>Kart tipi dağılımı</h2>
-        <p class="card-sub">Tam ve öğrenci basışları</p>
-        <div class="chart-box donut"><canvas id="cardTypeChart" role="img" aria-label="Tam ve öğrenci kart dağılımı halka grafiği"></canvas></div>
-      </article>
+      <form id="registerForm" class="auth-form" hidden>
+        <label class="field">
+          <span>Ad Soyad</span>
+          <input type="text" name="full_name" autocomplete="name" minlength="2" required />
+        </label>
+        <label class="field">
+          <span>E-posta</span>
+          <input type="email" name="email" autocomplete="email" required />
+        </label>
+        <label class="field">
+          <span>Şifre</span>
+          <input type="password" name="password" autocomplete="new-password" minlength="8" required />
+          <small>En az 8 karakter.</small>
+        </label>
+        <button type="submit" class="btn-primary">Hesap Oluştur</button>
+      </form>
 
-      <article class="card">
-        <h2>Kart tipi özeti</h2>
-        <p class="card-sub">Basış sayısı ve gelir karşılaştırması</p>
-        <div class="type-summary" id="typeSummary"></div>
-      </article>
-
-      <article class="card feed">
-        <h2>Son yolculuklar</h2>
-        <p class="card-sub">Mobil uygulamadan gelen kayıtlar</p>
-        <div class="table-wrap">
-          <table id="tripTable">
-            <thead>
-              <tr>
-                <th>Saat</th>
-                <th>Hat</th>
-                <th>Güzergâh</th>
-                <th>Kart</th>
-                <th>Ücret</th>
-              </tr>
-            </thead>
-            <tbody id="tripBody"></tbody>
-          </table>
-          <p id="emptyState" class="empty">
-            Henüz kayıt yok. Mobil uygulamadan ilk yolculuğu gönderin
-            ya da terminalden <code>npm run seed</code> çalıştırın.
-          </p>
-        </div>
-      </article>
+      <p class="auth-footnote">Arnavutköy Belediyesi — Akbil Simülasyon Projesi</p>
     </section>
   </main>
 
-  <footer class="footer">
-    <span>Arnavutköy Belediyesi — Akbil Simülasyon Projesi</span>
-    <button id="clearBtn" class="clear-btn">Verileri temizle</button>
-  </footer>
+  <script src="js/api.js"></script>
+  <script>
+    const tabLogin = document.getElementById("tabLogin");
+    const tabRegister = document.getElementById("tabRegister");
+    const loginForm = document.getElementById("loginForm");
+    const registerForm = document.getElementById("registerForm");
+    const message = document.getElementById("authMessage");
 
-  <script src="vendor/chart.umd.js"></script>
-  <script src="app.js"></script>
+    function showMessage(text, tone) {
+      message.textContent = text;
+      message.className = `auth-message ${tone}`;
+      message.hidden = false;
+    }
+
+    function clearMessage() {
+      message.hidden = true;
+    }
+
+    function selectTab(isLogin) {
+      tabLogin.classList.toggle("is-active", isLogin);
+      tabRegister.classList.toggle("is-active", !isLogin);
+      tabLogin.setAttribute("aria-selected", String(isLogin));
+      tabRegister.setAttribute("aria-selected", String(!isLogin));
+      loginForm.hidden = !isLogin;
+      registerForm.hidden = isLogin;
+      clearMessage();
+    }
+
+    tabLogin.addEventListener("click", () => selectTab(true));
+    tabRegister.addEventListener("click", () => selectTab(false));
+
+    /** Gönderim sırasında düğme kilitlenir — çift kayıt/çift giriş olmasın */
+    async function submit(form, action) {
+      const button = form.querySelector("button[type=submit]");
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = "Lütfen bekleyin…";
+      try {
+        await action(Object.fromEntries(new FormData(form)));
+      } catch (err) {
+        showMessage(err.message, "error");
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    }
+
+    loginForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      clearMessage();
+      submit(loginForm, async (data) => {
+        await api.login(data.email, data.password);
+        location.href = "panel.html";
+      });
+    });
+
+    registerForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      clearMessage();
+      submit(registerForm, async (data) => {
+        await api.register(data.full_name, data.email, data.password);
+        // Kayıt sonrası doğrudan içeri al — kullanıcı bilgilerini bir daha yazmasın
+        await api.login(data.email, data.password);
+        location.href = "panel.html";
+      });
+    });
+  </script>
 </body>
 </html>

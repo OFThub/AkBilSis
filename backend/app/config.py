@@ -30,6 +30,12 @@ class Settings(BaseSettings):
 
     trip_auto_close_minutes: int = 180
 
+    # Otobüs simülasyonu: konum duvar saatinden deterministik hesaplanır,
+    # çarpan gerçek saniyeyi sim-dakikaya çevirir (10 → 30 sn ≈ 5 dk yol)
+    sim_speed: float = 10.0
+    # Bir otobüsün "dolu" sayıldığı yolcu sayısı — yoğunluk renk kodunun paydası
+    bus_capacity: int = 40
+
     cors_origins: list[str] = ["*"]
 
 

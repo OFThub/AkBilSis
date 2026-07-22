@@ -1,11 +1,13 @@
+import argparse
 import json
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.core import Direction
+from app.core import CardMedium, Direction, hash_password
 from app.database import SessionLocal
-from app.models import Bus, Line, LineStop, Stop
+from app.models import Bus, Card, Line, LineStop, Passenger, Stop
+from app.simulation import BUSES_PER_LINE
 
 DATA_FILE = Path(__file__).resolve().parent.parent / "lines.json"
 
@@ -30,13 +32,26 @@ def _get_or_create_stop(db: Session, cache: dict[str, Stop], raw: dict) -> Stop:
     return stop
 
 
+def _hourly(payload: dict) -> list[int]:
+    """24 elemanlı yoğunluk profili — eksik/bozuk veri sıfır dizisine düşer."""
+    raw = payload.get("hourly") or []
+    if len(raw) != 24:
+        return [0] * 24
+    return [int(v) for v in raw]
+
+
 def _get_or_create_line(db: Session, payload: dict) -> Line:
     line = db.query(Line).filter(Line.code == payload["code"]).first()
     if line:
         line.name = payload["name"]
+        line.hourly_profile = _hourly(payload)
         return line
 
-    line = Line(code=payload["code"], name=payload["name"])
+    line = Line(
+        code=payload["code"],
+        name=payload["name"],
+        hourly_profile=_hourly(payload),
+    )
     db.add(line)
     db.flush()
     return line
@@ -74,7 +89,7 @@ def _sync_line_stops(db: Session, line: Line, stops: list[Stop], minutes: list[i
     db.flush()
 
 
-def _ensure_buses(db: Session, line: Line, count: int = 2) -> None:
+def _ensure_buses(db: Session, line: Line, count: int = BUSES_PER_LINE) -> None:
     existing = db.query(Bus).filter(Bus.line_id == line.id).count()
     for index in range(existing, count):
         db.add(
@@ -86,6 +101,36 @@ def _ensure_buses(db: Session, line: Line, count: int = 2) -> None:
             )
         )
     db.flush()
+
+
+def make_admin(db: Session, email: str, password: str) -> Passenger:
+    """Yönetici hesabı oluşturur ya da var olanı yönetici yapar.
+
+    Kayıt ucunda (AuthService.register) is_admin her zaman False'tur; ilk
+    yöneticiyi üretecek tek yol budur.
+    """
+    email = email.strip().lower()
+    passenger = db.query(Passenger).filter(Passenger.email == email).first()
+
+    if passenger:
+        passenger.is_admin = True
+        passenger.password_hash = hash_password(password)
+        print(f"{email} yönetici yapıldı, parolası güncellendi.")
+    else:
+        passenger = Passenger(
+            full_name="Sistem Yöneticisi",
+            email=email,
+            password_hash=hash_password(password),
+            is_admin=True,
+        )
+        db.add(passenger)
+        db.flush()
+        # Kayıt akışıyla aynı: her yolcunun bir mobil kartı olur
+        db.add(Card(passenger_id=passenger.id, medium=CardMedium.MOBILE))
+        print(f"{email} yönetici olarak oluşturuldu.")
+
+    db.commit()
+    return passenger
 
 
 def run() -> None:
@@ -114,5 +159,26 @@ def run() -> None:
         db.close()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Hat/durak verisini yükler.")
+    parser.add_argument(
+        "--admin",
+        nargs=2,
+        metavar=("EPOSTA", "PAROLA"),
+        help="Yönetici hesabı oluşturur ya da var olanı yönetici yapar",
+    )
+    args = parser.parse_args()
+
+    if args.admin:
+        db = SessionLocal()
+        try:
+            make_admin(db, args.admin[0], args.admin[1])
+        finally:
+            db.close()
+        return
+
     run()
+
+
+if __name__ == "__main__":
+    main()

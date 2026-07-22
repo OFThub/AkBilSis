@@ -4,8 +4,8 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import Boolean, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -88,15 +88,21 @@ class ForbiddenError(AppError):
     status_code = 403
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+#: bcrypt parolanın yalnızca ilk 72 baytını kullanır; kayıt şeması
+#: (RegisterRequest) bu sınırı zaten zorluyor, burada güvenlik ağı olarak durur.
+_BCRYPT_MAX_BYTES = 72
 
 
 def hash_password(raw: str) -> str:
-    return pwd_context.hash(raw)
+    return bcrypt.hashpw(raw.encode()[:_BCRYPT_MAX_BYTES], bcrypt.gensalt()).decode()
 
 
 def verify_password(raw: str, hashed: str) -> bool:
-    return pwd_context.verify(raw, hashed)
+    try:
+        return bcrypt.checkpw(raw.encode()[:_BCRYPT_MAX_BYTES], hashed.encode())
+    except ValueError:
+        # Bozuk/eski biçimli hash — hata fırlatmadan reddet
+        return False
 
 
 def _encode(payload: dict, secret: str, expires_in: timedelta) -> str:
