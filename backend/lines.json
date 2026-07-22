@@ -1,0 +1,54 @@
+[
+  {
+    "code": "448",
+    "name": "448 Arnavutköy – Mecidiyeköy",
+    "hourly": [2, 1, 1, 1, 3, 12, 38, 82, 100, 71, 42, 35, 33, 34, 38, 46, 63, 88, 95, 70, 44, 26, 14, 6],
+    "stops": [
+      { "name": "Arnavutköy Meydan", "minutes_from_previous": null },
+      { "name": "Fatih Caddesi", "minutes_from_previous": 6 },
+      { "name": "Taşoluk", "minutes_from_previous": 7 },
+      { "name": "Haraççı", "minutes_from_previous": 5 },
+      { "name": "Hadımköy Sanayi", "minutes_from_previous": 9 },
+      { "name": "Basın Ekspres", "minutes_from_previous": 14 },
+      { "name": "Mecidiyeköy", "minutes_from_previous": 18 }
+    ]
+  },
+  {
+    "code": "H-1",
+    "name": "H-1 Haraççı – Arnavutköy Merkez",
+    "hourly": [3, 2, 1, 1, 2, 8, 24, 52, 68, 61, 55, 58, 62, 60, 57, 59, 66, 74, 70, 52, 38, 25, 14, 7],
+    "stops": [
+      { "name": "Haraççı Merkez", "minutes_from_previous": null },
+      { "name": "Mustafa Kemal Paşa", "minutes_from_previous": 4 },
+      { "name": "Adnan Menderes Bulvarı", "minutes_from_previous": 5 },
+      { "name": "Devlet Hastanesi", "minutes_from_previous": 6 },
+      { "name": "Belediye", "minutes_from_previous": 3 },
+      { "name": "Arnavutköy Meydan", "minutes_from_previous": 4 }
+    ]
+  },
+  {
+    "code": "AR-2",
+    "name": "AR-2 Taşoluk – Devlet Hastanesi",
+    "hourly": [1, 1, 0, 0, 1, 4, 14, 34, 56, 78, 85, 80, 62, 68, 76, 72, 58, 46, 34, 24, 16, 10, 5, 2],
+    "stops": [
+      { "name": "Taşoluk Konutları", "minutes_from_previous": null },
+      { "name": "Taşoluk Merkez", "minutes_from_previous": 3 },
+      { "name": "Yavuz Selim Caddesi", "minutes_from_previous": 4 },
+      { "name": "İmam Hatip Lisesi", "minutes_from_previous": 5 },
+      { "name": "Belediye", "minutes_from_previous": 4 },
+      { "name": "Devlet Hastanesi", "minutes_from_previous": 3 }
+    ]
+  },
+  {
+    "code": "AR-3",
+    "name": "AR-3 Hadımköy – Arnavutköy",
+    "hourly": [4, 2, 2, 3, 10, 32, 74, 92, 66, 44, 32, 28, 30, 34, 40, 52, 86, 78, 50, 30, 20, 12, 7, 4],
+    "stops": [
+      { "name": "Hadımköy Sanayi", "minutes_from_previous": null },
+      { "name": "Ömerli", "minutes_from_previous": 7 },
+      { "name": "Deliklikaya", "minutes_from_previous": 6 },
+      { "name": "Dursunköy", "minutes_from_previous": 8 },
+      { "name": "Arnavutköy Meydan", "minutes_from_previous": 9 }
+    ]
+  }
+]
