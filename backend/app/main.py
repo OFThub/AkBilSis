@@ -1,12 +1,15 @@
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core import AppError
 from app.database import get_db
+from app.routes import routers
 
 
 @asynccontextmanager
@@ -31,6 +34,11 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+
 @app.get("/health", tags=["system"])
 def health(db: Session = Depends(get_db)) -> dict:
     try:
@@ -39,8 +47,8 @@ def health(db: Session = Depends(get_db)) -> dict:
     except Exception:
         database = "down"
 
-    return {
-        "status": "ok",
-        "app": settings.app_name,
-        "database": database,
-    }
+    return {"status": "ok", "app": settings.app_name, "database": database}
+
+
+for router in routers:
+    app.include_router(router, prefix=settings.api_prefix)
