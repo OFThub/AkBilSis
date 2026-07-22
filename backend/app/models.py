@@ -40,16 +40,10 @@ class Card(Base,UUIDMixin,TimestampMixin,SoftDeleteMixin):
     __tablename__ = "cards"
 
     nfc_uid: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
-    medium: Mapped[CardMedium] = mapped_column(
-        Enum(CardMedium, native_enum=False), default=CardMedium.MOBILE, nullable=False
-    )
-    card_type: Mapped[CardType] = mapped_column(
-        Enum(CardType, native_enum=False), default=CardType.NORMAL, nullable=False
-    )
+    medium: Mapped[CardMedium] = mapped_column(Enum(CardMedium, native_enum=False), default=CardMedium.MOBILE, nullable=False)
+    card_type: Mapped[CardType] = mapped_column(Enum(CardType, native_enum=False), default=CardType.NORMAL, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    passenger_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("passengers.id"), index=True
-    )
+    passenger_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("passengers.id"), index=True)
 
     passenger: Mapped["Passenger | None"] = relationship(back_populates="cards")
     trips: Mapped[list["Trip"]] = relationship(back_populates="card")
@@ -82,15 +76,9 @@ class LineStop(Base, UUIDMixin, TimestampMixin):
         UniqueConstraint("line_id", "direction", "stop_id", name="uq_line_direction_stop"),
     )
 
-    line_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("lines.id"), index=True, nullable=False
-    )
-    stop_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("stops.id"), index=True, nullable=False
-    )
-    direction: Mapped[Direction] = mapped_column(
-        Enum(Direction, native_enum=False), default=Direction.FORWARD, nullable=False
-    )
+    line_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("lines.id"), index=True, nullable=False)
+    stop_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("stops.id"), index=True, nullable=False)
+    direction: Mapped[Direction] = mapped_column(Enum(Direction, native_enum=False), default=Direction.FORWARD, nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     minutes_from_previous: Mapped[int | None] = mapped_column(Integer)
 
@@ -102,15 +90,9 @@ class Bus(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "buses"
 
     plate: Mapped[str] = mapped_column(String(16), unique=True, index=True, nullable=False)
-    line_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("lines.id"), index=True, nullable=False
-    )
-    direction: Mapped[Direction] = mapped_column(
-        Enum(Direction, native_enum=False), default=Direction.FORWARD, nullable=False
-    )
-    current_stop_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("stops.id")
-    )
+    line_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("lines.id"), index=True, nullable=False)
+    direction: Mapped[Direction] = mapped_column(Enum(Direction, native_enum=False), default=Direction.FORWARD, nullable=False)
+    current_stop_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("stops.id"))
     location_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -125,7 +107,6 @@ class  Device(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     api_key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     bus_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("buses.id"), index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
     bus: Mapped["Bus | None"] = relationship(back_populates="devices")
 
 class Trip(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
