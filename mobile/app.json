@@ -1,13 +1,17 @@
 {
   "expo": {
     "name": "Arnavutköy Akbil",
-    "slug": "akbil-arnavutkoy",
+    "slug": "akbilsis",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.akbilsis.akbilarnavutkoy",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -16,10 +20,19 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [],
+      "package": "com.anonymous.akbilarnavutkoy"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [],
+    "extra": {
+      "eas": {
+        "projectId": "f4c604cd-0fb5-4c2e-aec3-c0f9f88e2790"
+      }
+    },
+    "owner": "oftexpogos-team"
   }
 }

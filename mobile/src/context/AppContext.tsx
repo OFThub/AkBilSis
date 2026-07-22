@@ -8,52 +8,104 @@ import React, {
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { postTrip } from "../api/client";
-import { FARES, findLine, travelMinutes } from "../data/lines";
+import { SIM_SPEED } from "../config/env";
+import { findBus } from "../data/buses";
+import { findLine } from "../data/lines";
 import {
   ActiveTrip,
-  CardInfo,
   CardType,
+  CardUser,
+  CompletedTrip,
   Settings,
   TripRecord,
+  isCompleted,
 } from "../types";
-import { randomCardNo } from "../utils/format";
 
-const STORAGE_KEY = "akbil-state-v1";
+// v5: favoriler kişiye bağlandı, ücret alanı kaldırıldı, biniş anında kayıt açılıyor
+const STORAGE_KEY = "akbil-state-v5";
+const LEGACY_KEYS = [
+  "akbil-state-v4",
+  "akbil-state-v3",
+  "akbil-state-v2",
+  "akbil-state-v1",
+];
+
+/** Kutudan çıkar çıkmaz test edilebilsin diye örnek kullanıcılar */
+function seedUsers(): CardUser[] {
+  return [
+    {
+      id: "u-ahmet",
+      name: "Ahmet Yılmaz",
+      cardNo: "1042 7316",
+      cardType: "tam",
+    },
+    {
+      id: "u-zeynep",
+      name: "Zeynep Kaya",
+      cardNo: "2298 4471",
+      cardType: "ogrenci",
+    },
+    {
+      id: "u-mehmet",
+      name: "Mehmet Demir",
+      cardNo: "3355 9028",
+      cardType: "tam",
+    },
+  ];
+}
 
 interface AppState {
-  card: CardInfo;
-  activeTrip: ActiveTrip | null;
+  /** Kayıtlı kartlar — kart verisinin tek kaynağı */
+  users: CardUser[];
+  /** Devam eden yolculuklar — kullanıcı başına en çok bir tane */
+  activeTrips: ActiveTrip[];
   history: TripRecord[];
+  /** Kart başına yıldızlanan hatlar: userId → lineId[] — favoriler kişiye özeldir */
+  favoritesByUser: Record<string, string[]>;
   settings: Settings;
 }
 
 type Result = { ok: boolean; error?: string };
 
 export interface AlightResult extends Result {
-  record?: TripRecord;
+  record?: CompletedTrip;
   sent?: boolean;
 }
 
 interface AppApi extends AppState {
   ready: boolean;
   pendingCount: number;
-  setCardNo(cardNo: string): void;
-  setCardType(cardType: CardType): Result;
-  topUp(amount: number): void;
-  board(lineId: string, stopIndex: number): Result;
-  alight(stopIndex: number): Promise<AlightResult>;
-  retryPending(): Promise<number>;
+  addUser(name: string, cardNo: string, cardType: CardType): Result;
+  removeUser(id: string): void;
+  /** Kullanıcının devam eden yolculuğu — yoksa undefined */
+  activeTripFor(userId: string): ActiveTrip | undefined;
+  /**
+   * Yolda olan bir araca bindirir; biniş durağı aracın anlık konumundan gelir.
+   * Geçmişe hemen "otobüste" durumunda bir kayıt açılır.
+   */
+  board(userId: string, lineId: string, busId: string): Result;
+  /**
+   * Yolculuğu bitirir: binişte açılan kayıt tamamlanır ve sunucuya gönderilir.
+   * İniş durağı seçilmez — aracın o anda en yakın olduğu duraktır.
+   */
+  alight(userId: string): Promise<AlightResult>;
+  /** cardNo verilirse yalnızca o karta ait bekleyen kayıtlar gönderilir */
+  retryPending(cardNo?: string): Promise<number>;
+  /** Kartın favori hatlarını verir — kart okutulmadan favori görülmez/eklenmez */
+  favoritesFor(userId: string): string[];
+  /** Hattı o kartın favorilerine ekler ya da çıkarır */
+  toggleFavorite(userId: string, lineId: string): void;
   updateSettings(patch: Partial<Settings>): void;
   resetAll(): void;
 }
 
 function defaultState(): AppState {
   return {
-    card: { cardNo: randomCardNo(), cardType: "tam", balance: 100 },
-    activeTrip: null,
+    users: seedUsers(),
+    activeTrips: [],
     history: [],
+    favoritesByUser: {},
     settings: {
-      backendUrl: "http://localhost:4000",
       demoMode: false,
       demoHour: 8,
     },
@@ -67,14 +119,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const loadedRef = useRef(false);
 
-  // Kalıcı durum: açılışta yükle
+  // Kalıcı durum: açılışta yükle (eski sürüm kayıtları da okunur)
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        let raw = await AsyncStorage.getItem(STORAGE_KEY);
+        for (const key of LEGACY_KEYS) {
+          if (raw) break;
+          raw = await AsyncStorage.getItem(key);
+        }
         if (raw) {
-          const saved = JSON.parse(raw) as AppState;
-          setState({ ...defaultState(), ...saved });
+          const saved = JSON.parse(raw) as Partial<AppState>;
+          const base = defaultState();
+          const savedSettings = saved.settings ?? base.settings;
+          setState({
+            // Eski kayıtlarda kullanıcı listesi yok — örneklerle başlat
+            users:
+              Array.isArray(saved.users) && saved.users.length > 0
+                ? saved.users
+                : base.users,
+            // v3 ve öncesinde aktif yolculuk kişiye bağlı değildi — taşınamaz
+            activeTrips: Array.isArray(saved.activeTrips)
+              ? saved.activeTrips
+              : [],
+            history: Array.isArray(saved.history) ? saved.history : [],
+            // v4 ve öncesinde favoriler ortaktı — hangi karta ait olduğu
+            // bilinmediği için taşınmaz
+            favoritesByUser:
+              saved.favoritesByUser && !Array.isArray(saved.favoritesByUser)
+                ? saved.favoritesByUser
+                : {},
+            // Alanlar tek tek alınır ki eski kayıttaki backendUrl/nfcEnabled sızmasın
+            settings: {
+              demoMode: savedSettings.demoMode ?? base.settings.demoMode,
+              demoHour: savedSettings.demoHour ?? base.settings.demoHour,
+            },
+          });
         }
       } catch {
         // Bozuk kayıt varsa varsayılanla devam et
@@ -91,116 +171,171 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => {});
   }, [state]);
 
-  const setCardNo = useCallback((cardNo: string) => {
-    setState((s) => ({ ...s, card: { ...s.card, cardNo } }));
-  }, []);
-
-  const setCardType = useCallback(
-    (cardType: CardType): Result => {
-      if (state.activeTrip) {
-        return {
-          ok: false,
-          error: "Yolculuk sırasında kart tipi değiştirilemez.",
-        };
+  const addUser = useCallback(
+    (name: string, cardNo: string, cardType: CardType): Result => {
+      const trimmedName = name.trim();
+      const trimmedCard = cardNo.trim();
+      if (!trimmedName) return { ok: false, error: "Kullanıcı adı boş olamaz." };
+      if (!trimmedCard) return { ok: false, error: "Kart numarası boş olamaz." };
+      if (state.users.some((u) => u.cardNo === trimmedCard)) {
+        return { ok: false, error: "Bu kart numarası zaten kayıtlı." };
       }
-      setState((s) => ({ ...s, card: { ...s.card, cardType } }));
+      const user: CardUser = {
+        id: `u-${Date.now()}-${Math.floor(Math.random() * 1e4)}`,
+        name: trimmedName,
+        cardNo: trimmedCard,
+        cardType,
+      };
+      setState((s) => ({ ...s, users: [...s.users, user] }));
       return { ok: true };
     },
-    [state.activeTrip]
+    [state.users]
   );
 
-  const topUp = useCallback((amount: number) => {
-    setState((s) => ({
-      ...s,
-      card: { ...s.card, balance: Math.round((s.card.balance + amount) * 100) / 100 },
-    }));
+  const removeUser = useCallback((id: string) => {
+    setState((s) => ({ ...s, users: s.users.filter((u) => u.id !== id) }));
   }, []);
 
+  const activeTripFor = useCallback(
+    (userId: string): ActiveTrip | undefined =>
+      state.activeTrips.find((t) => t.userId === userId),
+    [state.activeTrips]
+  );
+
   const board = useCallback(
-    (lineId: string, stopIndex: number): Result => {
-      if (state.activeTrip) {
+    (userId: string, lineId: string, busId: string): Result => {
+      const user = state.users.find((u) => u.id === userId);
+      if (!user) return { ok: false, error: "Kayıtlı kullanıcı bulunamadı." };
+
+      // Aynı kişi inmeden ikinci kez binemez
+      const ongoing = state.activeTrips.find((t) => t.userId === userId);
+      if (ongoing) {
+        const ongoingLine = findLine(ongoing.lineId);
         return {
           ok: false,
-          error: "İnmeden tekrar binemezsiniz — önce aktif yolculuğu bitirin.",
+          error: `Zaten ${ongoingLine?.name ?? "bir hatta"} yolculuğundasınız (${
+            ongoing.busPlate
+          }). Yeni araca binmeden önce inmelisiniz.`,
         };
       }
+
       const line = findLine(lineId);
       if (!line) return { ok: false, error: "Hat bulunamadı." };
-      if (stopIndex < 0 || stopIndex >= line.stops.length - 1) {
-        return { ok: false, error: "Son duraktan biniş yapılamaz." };
-      }
-      const fare = FARES[state.card.cardType];
-      if (state.card.balance < fare) {
+
+      const now = new Date();
+      const bus = findBus(lineId, busId, now);
+      if (!bus) {
         return {
           ok: false,
-          error: "Bakiye yetersiz. Kartım ekranından bakiye yükleyin.",
+          error: "Seçilen araç artık seferde değil — listeyi yenileyin.",
+        };
+      }
+      if (bus.layover) {
+        return {
+          ok: false,
+          error: "Bu araç son durakta sefer bekliyor — yoldaki bir araç seçin.",
         };
       }
 
-      // Biniş saati = şimdiki zaman (demo modunda saat elle seçilir)
-      const now = new Date();
+      // Kayda yazılan saat demo modunda kaydırılabilir; süre ölçümü için
+      // gerçek an ayrıca saklanır
+      const boardDate = new Date(now);
       if (state.settings.demoMode) {
-        now.setHours(state.settings.demoHour);
+        boardDate.setHours(state.settings.demoHour);
       }
 
+      // Kayıt binişte açılır: yolcunun araçta olduğu buradan bilinir, geçmişte
+      // hemen görünür ve inişte aynı kayıt tamamlanır
+      const recordId = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      const record: TripRecord = {
+        localId: recordId,
+        cardNo: user.cardNo,
+        cardType: user.cardType,
+        line: line.name,
+        boardingStop: line.stops[bus.nearestStopIndex],
+        boardTime: boardDate.toISOString(),
+        alightingStop: null,
+        alightTime: null,
+        durationMin: null,
+        busPlate: bus.plate,
+        status: "onboard",
+      };
+
+      const trip: ActiveTrip = {
+        userId,
+        recordId,
+        lineId,
+        busId,
+        busPlate: bus.plate,
+        boardingStopIndex: bus.nearestStopIndex,
+        boardTime: boardDate.toISOString(),
+        boardRealTime: now.toISOString(),
+      };
       setState((s) => ({
         ...s,
-        card: {
-          ...s.card,
-          balance: Math.round((s.card.balance - fare) * 100) / 100,
-        },
-        activeTrip: {
-          lineId,
-          boardingStopIndex: stopIndex,
-          boardTime: now.toISOString(),
-          fare,
-        },
+        activeTrips: [...s.activeTrips, trip],
+        history: [record, ...s.history],
       }));
       return { ok: true };
     },
-    [state.activeTrip, state.card, state.settings]
+    [state.users, state.activeTrips, state.settings]
   );
 
   const alight = useCallback(
-    async (stopIndex: number): Promise<AlightResult> => {
-      const trip = state.activeTrip;
+    async (userId: string): Promise<AlightResult> => {
+      const trip = state.activeTrips.find((t) => t.userId === userId);
       if (!trip) return { ok: false, error: "Aktif yolculuk yok." };
       const line = findLine(trip.lineId);
       if (!line) return { ok: false, error: "Hat bulunamadı." };
-      if (stopIndex <= trip.boardingStopIndex || stopIndex >= line.stops.length) {
+      const user = state.users.find((u) => u.id === userId);
+      if (!user) return { ok: false, error: "Kayıtlı kullanıcı bulunamadı." };
+
+      // İniş durağı seçilmez: aracın gerçek zamanlı en yakın durağıdır
+      const now = new Date();
+      const bus = findBus(trip.lineId, trip.busId, now);
+      if (!bus) {
         return {
           ok: false,
-          error: "İniş durağı biniş durağından sonra olmalı.",
+          error: "Aracın konumu okunamadı — birazdan tekrar deneyin.",
         };
       }
 
-      // İniş saati = biniş + duraklar arası sürelerin toplamı
-      const durationMin = travelMinutes(line, trip.boardingStopIndex, stopIndex);
+      // Süre = araçta geçen gerçek zaman × simülasyon hızı (en az 1 dk)
+      const elapsedRealMin =
+        (now.getTime() - new Date(trip.boardRealTime).getTime()) / 60000;
+      const durationMin = Math.max(1, Math.round(elapsedRealMin * SIM_SPEED));
       const boardDate = new Date(trip.boardTime);
       const alightDate = new Date(boardDate.getTime() + durationMin * 60000);
 
-      const record: TripRecord = {
-        localId: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
-        cardNo: state.card.cardNo,
-        cardType: state.card.cardType,
+      // Binişte açılan kayıt tamamlanır — yeni satır eklenmez
+      const existing = state.history.find((r) => r.localId === trip.recordId);
+      const record: CompletedTrip = {
+        localId: trip.recordId,
+        cardNo: user.cardNo,
+        cardType: user.cardType,
         line: line.name,
-        boardingStop: line.stops[trip.boardingStopIndex],
-        alightingStop: line.stops[stopIndex],
+        boardingStop:
+          existing?.boardingStop ?? line.stops[trip.boardingStopIndex],
         boardTime: trip.boardTime,
+        alightingStop: line.stops[bus.nearestStopIndex],
         alightTime: alightDate.toISOString(),
         durationMin,
-        fare: trip.fare,
+        busPlate: trip.busPlate,
         status: "pending",
       };
 
       // Önce yerelde bitir (iniş), sonra göndermeyi dene
       setState((s) => ({
         ...s,
-        activeTrip: null,
-        history: [record, ...s.history],
+        activeTrips: s.activeTrips.filter((t) => t.userId !== userId),
+        // Binişteki kayıt beklenen yerde yoksa (bozuk/elden düşme durumu)
+        // tamamlanan yolculuk sessizce kaybolmasın diye başa eklenir
+        history: s.history.some((r) => r.localId === trip.recordId)
+          ? s.history.map((r) => (r.localId === trip.recordId ? record : r))
+          : [record, ...s.history],
       }));
 
-      const sent = await postTrip(state.settings.backendUrl, record);
+      const sent = await postTrip(record);
       if (sent) {
         setState((s) => ({
           ...s,
@@ -211,14 +346,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       return { ok: true, record, sent };
     },
-    [state.activeTrip, state.card, state.settings]
+    [state.activeTrips, state.users, state.history]
   );
 
-  const retryPending = useCallback(async (): Promise<number> => {
-    const pending = state.history.filter((r) => r.status === "pending");
+  const retryPending = useCallback(async (cardNo?: string): Promise<number> => {
+    // Araçtaki (onboard) kayıtlar henüz tamamlanmadığı için gönderilmez
+    const pending = state.history.filter(
+      (r): r is CompletedTrip =>
+        r.status === "pending" && isCompleted(r) && (!cardNo || r.cardNo === cardNo)
+    );
     let sentCount = 0;
     for (const record of pending) {
-      const sent = await postTrip(state.settings.backendUrl, record);
+      const sent = await postTrip(record);
       if (sent) {
         sentCount++;
         setState((s) => ({
@@ -230,7 +369,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
     return sentCount;
-  }, [state.history, state.settings]);
+  }, [state.history]);
+
+  const favoritesFor = useCallback(
+    (userId: string): string[] => state.favoritesByUser[userId] ?? [],
+    [state.favoritesByUser]
+  );
+
+  const toggleFavorite = useCallback((userId: string, lineId: string) => {
+    setState((s) => {
+      const current = s.favoritesByUser[userId] ?? [];
+      return {
+        ...s,
+        favoritesByUser: {
+          ...s.favoritesByUser,
+          [userId]: current.includes(lineId)
+            ? current.filter((id) => id !== lineId)
+            : [...current, lineId],
+        },
+      };
+    });
+  }, []);
 
   const updateSettings = useCallback((patch: Partial<Settings>) => {
     setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
@@ -239,8 +398,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const resetAll = useCallback(() => {
     setState((s) => {
       const fresh = defaultState();
-      // Backend adresi kullanıcı emeği — sıfırlamada koru
-      fresh.settings.backendUrl = s.settings.backendUrl;
+      // Favoriler kullanıcı emeği — sıfırlamada korunur
+      // (backend adresi zaten .env'de, sıfırlamadan etkilenmez)
+      fresh.favoritesByUser = s.favoritesByUser;
       return fresh;
     });
   }, []);
@@ -249,12 +409,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ...state,
     ready,
     pendingCount: state.history.filter((r) => r.status === "pending").length,
-    setCardNo,
-    setCardType,
-    topUp,
+    addUser,
+    removeUser,
+    activeTripFor,
     board,
     alight,
     retryPending,
+    favoritesFor,
+    toggleFavorite,
     updateSettings,
     resetAll,
   };

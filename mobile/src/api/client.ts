@@ -1,4 +1,5 @@
-import { TripRecord } from "../types";
+import { BACKEND_URL } from "../config/env";
+import { CompletedTrip } from "../types";
 
 function normalize(baseUrl: string): string {
   let url = baseUrl.trim().replace(/\/+$/, "");
@@ -20,14 +21,16 @@ async function fetchWithTimeout(
   }
 }
 
-/** Yolculuk kaydını backend'e gönderir; başarıysa true */
-export async function postTrip(
-  baseUrl: string,
-  record: TripRecord
-): Promise<boolean> {
+/**
+ * Tamamlanmış yolculuk kaydını backend'e gönderir; başarıysa true.
+ * Tip gereği yalnızca inişi bitmiş kayıt geçebilir — araçtaki (onboard) kayıt
+ * gönderilemez, çünkü iniş bilgisi henüz yoktur.
+ */
+export async function postTrip(record: CompletedTrip): Promise<boolean> {
   try {
-    const { localId, status, ...payload } = record;
-    const res = await fetchWithTimeout(`${normalize(baseUrl)}/api/trips`, {
+    // Yerel alanlar (localId, status, busPlate) sunucuya gitmez
+    const { localId, status, busPlate, ...payload } = record;
+    const res = await fetchWithTimeout(`${normalize(BACKEND_URL)}/api/trips`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -38,11 +41,11 @@ export async function postTrip(
   }
 }
 
-/** Ayarlar ekranındaki bağlantı testi */
-export async function checkHealth(baseUrl: string): Promise<boolean> {
+/** Ayarlar ekranındaki bağlantı testi — adres .env'den gelir, arayüzde gösterilmez */
+export async function checkHealth(): Promise<boolean> {
   try {
     const res = await fetchWithTimeout(
-      `${normalize(baseUrl)}/api/health`,
+      `${normalize(BACKEND_URL)}/api/health`,
       {},
       4000
     );
