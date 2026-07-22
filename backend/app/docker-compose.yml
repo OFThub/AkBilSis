@@ -4,9 +4,9 @@ services:
     container_name: akbil-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: akbil
-      POSTGRES_PASSWORD: akbil
-      POSTGRES_DB: akbil
+      POSTGRES_USER: akbil-sis
+      POSTGRES_PASSWORD: akbil-sis
+      POSTGRES_DB: akbilms
     ports:
       - "5432:5432"
     volumes:
