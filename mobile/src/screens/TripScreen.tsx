@@ -160,20 +160,33 @@ export default function TripScreen() {
             <SectionCard>
               <SectionTitle>İniş</SectionTitle>
               <Text style={styles.alightInfo}>
-                İneceğiniz durağı seçmenize gerek yok — kayda, aracın o anda en
-                yakın olduğu durak yazılır:
+                {tripBus?.atStop
+                  ? "Otobüs durakta — şimdi inebilirsiniz. İneceğiniz durağı seçmenize gerek yok, kayda bu durak yazılır:"
+                  : "Otobüs duraklar arasında. İnmek için bir sonraki durağa varmasını bekleyin:"}
               </Text>
               <Text style={styles.alightStop}>
-                {tripBus ? tripLine.stops[tripBus.nearestStopIndex] : "—"}
+                {tripBus
+                  ? tripLine.stops[
+                      tripBus.atStop ? tripBus.fromIndex : tripBus.toIndex
+                    ]
+                  : "—"}
               </Text>
               <PrimaryButton
-                label={alighting ? "İniliyor…" : "Otobüsten İn"}
+                label={
+                  alighting
+                    ? "İniliyor…"
+                    : tripBus?.atStop
+                    ? "Otobüsten İn"
+                    : "Durak bekleniyor…"
+                }
                 onPress={handleAlight}
-                disabled={alighting || !tripBus}
+                disabled={alighting || !tripBus?.atStop}
               />
               <Text style={styles.hint}>
                 İnmeden başka bir araca binemezsiniz. Yolculuğunuz binerken
-                Geçmiş'e "Otobüste" olarak yazıldı; inince tamamlanır.
+                Geçmiş'e "Otobüste" olarak yazıldı; inince tamamlanır. İnmezseniz
+                otobüs son durağa varınca ({tripLine.stops[tripLine.stops.length - 1]})
+                otomatik indirilirsiniz.
               </Text>
             </SectionCard>
 
@@ -237,8 +250,9 @@ export default function TripScreen() {
                 />
               ))}
               <Text style={styles.hint}>
-                Konumlar canlıdır. Biniş durağınız, seçtiğiniz aracın o anda en
-                yakın olduğu duraktır — ayrıca durak seçmezsiniz.
+                Konumlar canlıdır. Yalnızca durakta bekleyen otobüse
+                binebilirsiniz; biniş durağınız o duraktır, ayrıca durak
+                seçmezsiniz.
               </Text>
             </SectionCard>
 
@@ -308,7 +322,7 @@ function BusCard({
       : styles.occTextHigh;
 
   return (
-    <View style={[styles.busCard, bus.layover && styles.busCardIdle]}>
+    <View style={[styles.busCard, !bus.atStop && styles.busCardIdle]}>
       <View style={styles.busTop}>
         <Text style={styles.busPlate}>🚌 {bus.plate}</Text>
         <View style={[styles.occChip, occStyle]}>
@@ -318,10 +332,17 @@ function BusCard({
         </View>
       </View>
       <Text style={styles.busWhere}>{busLocationText(bus, line)}</Text>
+      {/* Biniş yalnızca araç durakta beklerken açıktır */}
       <PrimaryButton
-        label={bus.layover ? "Sefer bekliyor" : "Bin"}
+        label={
+          bus.layover
+            ? "Sefer bekliyor"
+            : bus.atStop
+            ? "Bin"
+            : `${bus.minutesToNext} dk sonra ${line.stops[bus.toIndex]}`
+        }
         onPress={onBoard}
-        disabled={bus.layover}
+        disabled={!bus.atStop}
       />
     </View>
   );
@@ -341,7 +362,7 @@ function StopRail({
     <View>
       {line.stops.map((stop, idx) => {
         const atStop = buses.filter(
-          (bus) => bus.atStop && bus.nearestStopIndex === idx
+          (bus) => bus.atStop && bus.fromIndex === idx
         );
         // Duraktan ayrılmış, bir sonrakine gidiyor → iki durak arasına çizilir
         const onSegment = buses.filter(

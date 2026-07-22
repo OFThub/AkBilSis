@@ -126,10 +126,3 @@ export function peakHours(line: BusLine, count = 2): number[] {
   }
   return peaks.sort((a, b) => a - b);
 }
-
-/** Biniş durağından itibaren kümülatif süreler — durak seçim listesi için */
-export function cumulativeMinutes(line: BusLine, fromIndex: number): number[] {
-  return line.stops.map((_, idx) =>
-    idx <= fromIndex ? 0 : travelMinutes(line, fromIndex, idx)
-  );
-}
