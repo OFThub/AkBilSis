@@ -152,13 +152,49 @@ npm start
   bilgisayar aynı Wi-Fi'da olmalı.
 - **Bilgisayarda:** `npm run web`.
 
-Backend adresi arayüzden değil `mobile/.env` dosyasından okunur
-(`EXPO_PUBLIC_BACKEND_URL`). Telefondan test ederken **`localhost` yazmayın** —
-telefonda o adres telefonun kendisidir; bilgisayarın ağ adresini yazın.
-`.env` değişince Metro önbelleğini temizleyin: `npx expo start -c`.
+Backend adresi **elle girilmez**: uygulama, kendisini indirdiği Expo/Metro
+sunucusunun adresinden türetir (aynı bilgisayar, port 8000). Böylece Wi-Fi ya da
+DHCP adresi değiştiğinde hiçbir dosya güncellenmez. Adres açılışta Metro
+günlüğüne yazılır: `[akbil] backend adresi: http://…:8000`.
 
-> Wi-Fi'da istemci yalıtımı (AP isolation) açıksa telefon bilgisayara
-> ulaşamaz; yönlendirici ayarından kapatılmalıdır.
+Yalnızca backend **başka bir makinede** ya da başka bir portta çalışıyorsa
+`mobile/.env` içindeki `EXPO_PUBLIC_BACKEND_URL` doldurulur. `.env` değişince
+Metro önbelleğini temizleyin: `npx expo start -c`.
+
+### Telefon backend'e ulaşamıyorsa
+
+Belirti hangi katmanın koptuğunu söyler:
+
+| Belirti | Sebep | Çözüm |
+|---|---|---|
+| Uygulama **hiç açılmıyor** (QR'da IOException) | Telefon bilgisayara hiç ulaşamıyor: Wi-Fi istemci yalıtımı (AP isolation) ya da farklı ağ | Aynı Wi-Fi'da olun; kurumsal/misafir ağda yalıtım açıksa telefonun hotspot'unu kullanın |
+| Uygulama açılıyor, **"Sunucuya ulaşılamadı"** | Backend çalışmıyor **veya** 8000 portu güvenlik duvarında kapalı | Aşağıdaki iki adım |
+
+**1. Backend gerçekten dinliyor mu?**
+
+```powershell
+Get-NetTCPConnection -State Listen | Where-Object LocalPort -eq 8000
+```
+
+Boş dönerse uvicorn çalışmıyordur. `--host 0.0.0.0` ile başlatın; `127.0.0.1`
+ile başlatılırsa yalnızca bilgisayarın kendisi erişebilir.
+
+**2. Güvenlik duvarı 8000'e izin veriyor mu?**
+
+Windows kuralları **dosya yoluna** göredir: sistem python'una verilmiş bir izin
+`backend\.venv\Scripts\python.exe` için geçerli değildir. Port bazlı kural bu
+yüzden gerekir (yönetici PowerShell):
+
+```powershell
+New-NetFirewallRule -DisplayName "AkBil backend 8000" `
+  -Direction Inbound -Protocol TCP -LocalPort 8000 `
+  -Action Allow -Profile Private,Public
+```
+
+Geri almak için: `Remove-NetFirewallRule -DisplayName "AkBil backend 8000"`
+
+Doğrulama: telefonun tarayıcısında `http://<bilgisayar-ip>:8000/health` adresini
+açın. `{"status":"ok"}` görünüyorsa ağ yolu tamamdır.
 
 ## Uygulama kuralları
 
@@ -170,9 +206,10 @@ telefonda o adres telefonun kendisidir; bilgisayarın ağ adresini yazın.
   araca binilirse önceki yolculuk "yarıda kaldı" (`ABANDONED`) sayılır.
 - **Son durakta otomatik iniş** yolcu inmeyi unutursa devreye girer.
 - **Ücret/bakiye kavramı yoktur:** tam ve öğrenci yalnızca statü farkıdır. Kart
-  tipini yalnızca yönetici değiştirebilir (`PATCH /admin/cards/{id}/type`);
-  süren yolculuklar etkilenmez, çünkü tip biniş anında `card_type_snapshot`
-  olarak damgalanır.
+  tipi **kayıt sırasında beyan edilir** (web ve mobilde Tam / Öğrenci seçimi).
+  Beyan doğrulanmaz — belge kontrolü belediyede yapılır ve yönetici
+  `PATCH /admin/cards/{id}/type` ile düzeltebilir. Süren yolculuklar
+  etkilenmez, çünkü tip biniş anında `card_type_snapshot` olarak damgalanır.
 - **Ayarlar ekranı sunucuya hiç istek atmaz:** yalnızca tema (açık/koyu) ve dil
   (TR/EN) seçimi vardır ve bunlar telefonda saklanır.
 

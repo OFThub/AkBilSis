@@ -26,7 +26,7 @@ import {
   setSessionExpiredHandler,
   setTokens,
 } from "../api/client";
-import { Passenger, Settings } from "../types";
+import { CardType, Passenger, Settings } from "../types";
 
 /** v7: liste tabanlı kimlik kalktı, oturum sunucudan geliyor */
 const SESSION_KEY = "akbil-session-v7";
@@ -52,7 +52,12 @@ interface AppApi {
   passenger: Passenger | null;
   settings: Settings;
   login(email: string, password: string): Promise<Result>;
-  register(fullName: string, email: string, password: string): Promise<Result>;
+  register(
+    fullName: string,
+    email: string,
+    password: string,
+    cardType: CardType
+  ): Promise<Result>;
   logout(): Promise<void>;
   updateSettings(patch: Partial<Settings>): void;
 }
@@ -147,9 +152,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const register = useCallback(
-    async (fullName: string, email: string, password: string): Promise<Result> => {
+    async (
+      fullName: string,
+      email: string,
+      password: string,
+      cardType: CardType
+    ): Promise<Result> => {
       try {
-        await api.register(fullName.trim(), email.trim(), password);
+        await api.register(fullName.trim(), email.trim(), password, cardType);
         // Kayıt sonrası doğrudan içeri al — kullanıcı bilgilerini bir daha yazmasın
         await startSession(await api.login(email.trim(), password));
         return { ok: true };

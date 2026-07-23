@@ -30,6 +30,11 @@ const tr = {
   toRegister: "Hesabınız yok mu? Kayıt olun",
   toLogin: "Zaten hesabınız var mı? Giriş yapın",
   pleaseWait: "Lütfen bekleyin…",
+  cardTypeLabel: "Kart Tipi",
+  cardTypeNormalHint: "Standart yolcu",
+  cardTypeStudentHint: "Belge ile doğrulanır",
+  cardTypeNote:
+    "Öğrenci kartı için belgenizi belediyeye ibraz etmeniz gerekir; doğrulanmazsa kartınız tam tarifeye çevrilir.",
 
   // Yolculuk
   tripTitle: "Yolculuk",
@@ -119,6 +124,11 @@ const en: Record<TranslationKey, string> = {
   toRegister: "No account? Sign up",
   toLogin: "Already have an account? Sign in",
   pleaseWait: "Please wait…",
+  cardTypeLabel: "Card Type",
+  cardTypeNormalHint: "Standard fare",
+  cardTypeStudentHint: "Verified by document",
+  cardTypeNote:
+    "Student cards require proof of enrolment at the municipality; without it the card reverts to the standard fare.",
 
   tripTitle: "Trip",
   selectLine: "Select a line",

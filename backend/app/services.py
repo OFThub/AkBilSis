@@ -76,7 +76,13 @@ class AuthService:
         self.db = db
         self.passengers = PassengerRepository(db)
 
-    def register(self, full_name: str, email: str, password: str) -> Passenger:
+    def register(
+        self,
+        full_name: str,
+        email: str,
+        password: str,
+        card_type: CardType = CardType.NORMAL,
+    ) -> Passenger:
         if self.passengers.get_by_email(email):
             raise ConflictError("Bu e-posta zaten kayıtlı")
 
@@ -87,7 +93,13 @@ class AuthService:
         )
         self.passengers.add(passenger)
 
-        card = Card(passenger_id=passenger.id, medium=CardMedium.MOBILE)
+        # Kart tipi başvuruda beyan edilir; belge kontrolü belediyede yapılır ve
+        # gerekirse yönetici PATCH /admin/cards/{id}/type ile düzeltir.
+        card = Card(
+            passenger_id=passenger.id,
+            medium=CardMedium.MOBILE,
+            card_type=card_type,
+        )
         self.db.add(card)
 
         self.db.commit()

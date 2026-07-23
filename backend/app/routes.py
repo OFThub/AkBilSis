@@ -70,7 +70,9 @@ admin_router = APIRouter(
 
 @auth_router.post("/register", response_model=PassengerRead, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: DbSession):
-    return AuthService(db).register(payload.full_name, payload.email, payload.password)
+    return AuthService(db).register(
+        payload.full_name, payload.email, payload.password, payload.card_type
+    )
 
 
 @auth_router.post("/login", response_model=TokenPair)

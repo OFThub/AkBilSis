@@ -13,7 +13,9 @@ import { useApp } from "../context/AppContext";
 import { usePalette } from "../hooks/useTheme";
 import { useT } from "../i18n";
 import { Palette, radius } from "../theme";
+import { cardTypeKey } from "../utils/format";
 import { Field, InfoBanner, PrimaryButton } from "../components/UI";
+import { CardType } from "../types";
 
 type Mode = "login" | "register";
 
@@ -31,6 +33,7 @@ export default function AuthScreen() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [cardType, setCardType] = useState<CardType>("normal");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -49,7 +52,7 @@ export default function AuthScreen() {
 
     const result = isLogin
       ? await app.login(email, password)
-      : await app.register(fullName, email, password);
+      : await app.register(fullName, email, password, cardType);
 
     // Başarılıysa AppContext oturumu kurar ve App.tsx sekmelere geçer; bu
     // bileşen unmount olacağı için ek bir işlem gerekmez
@@ -131,6 +134,42 @@ export default function AuthScreen() {
             autoComplete={isLogin ? "current-password" : "new-password"}
           />
 
+          {!isLogin && (
+            <View style={styles.cardTypeBlock}>
+              <Text style={styles.cardTypeLabel}>{t("cardTypeLabel")}</Text>
+              <View style={styles.cardTypeRow}>
+                {(
+                  [
+                    { value: "normal", hint: "cardTypeNormalHint" },
+                    { value: "student", hint: "cardTypeStudentHint" },
+                  ] as const
+                ).map((option) => {
+                  const active = cardType === option.value;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      onPress={() => setCardType(option.value)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active }}
+                      style={[styles.cardTypeBox, active && styles.cardTypeBoxActive]}
+                    >
+                      <Text
+                        style={[
+                          styles.cardTypeName,
+                          active && styles.cardTypeNameActive,
+                        ]}
+                      >
+                        {t(cardTypeKey(option.value))}
+                      </Text>
+                      <Text style={styles.cardTypeHint}>{t(option.hint)}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={styles.cardTypeNote}>{t("cardTypeNote")}</Text>
+            </View>
+          )}
+
           <PrimaryButton
             label={
               busy ? t("pleaseWait") : isLogin ? t("loginAction") : t("registerAction")
@@ -187,6 +226,38 @@ function makeStyles(palette: Palette) {
     tabActive: { backgroundColor: palette.card },
     tabLabel: { fontSize: 14.5, fontWeight: "700", color: palette.ink2 },
     tabLabelActive: { color: palette.navy900, fontWeight: "800" },
+    cardTypeBlock: { marginBottom: 14 },
+    cardTypeLabel: {
+      fontSize: 11.5,
+      fontWeight: "700",
+      letterSpacing: 0.9,
+      textTransform: "uppercase",
+      color: palette.ink3,
+      marginBottom: 6,
+    },
+    cardTypeRow: { flexDirection: "row", gap: 10 },
+    cardTypeBox: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: palette.line,
+      borderRadius: radius.control,
+      backgroundColor: palette.surface,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+    },
+    cardTypeBoxActive: {
+      borderColor: palette.blue,
+      backgroundColor: palette.chipBlueBg,
+    },
+    cardTypeName: { fontSize: 15, fontWeight: "700", color: palette.ink },
+    cardTypeNameActive: { color: palette.navy900, fontWeight: "800" },
+    cardTypeHint: { fontSize: 11.5, color: palette.ink3, marginTop: 2 },
+    cardTypeNote: {
+      fontSize: 11.5,
+      color: palette.ink3,
+      lineHeight: 16,
+      marginTop: 8,
+    },
     switchRow: { marginTop: 16, alignItems: "center" },
     switchText: { fontSize: 13, fontWeight: "600", color: palette.blue },
     footer: {
