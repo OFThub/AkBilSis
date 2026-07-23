@@ -413,7 +413,7 @@ Pydantic v2 modelleri. `ORMModel` ([9-10](../backend/app/schemas.py#L9-L10))
 
 ---
 
-## B.6 `app/repositories.py` — 472 satır
+## B.6 `app/repositories.py` — 471 satır
 
 **Görevi:** Tüm SQL burada. Servisler sorgu yazmaz.
 
@@ -471,7 +471,7 @@ alındığında diğerlerinin konumu zıplardı
 ([services.py:268](../backend/app/services.py#L268),
 [services.py:385](../backend/app/services.py#L385)).
 
-### `TripRepository` — [205-454](../backend/app/repositories.py#L205-L454)
+### `TripRepository` — [205-453](../backend/app/repositories.py#L205-L453)
 
 En yoğun repository.
 
@@ -483,18 +483,18 @@ En yoğun repository.
 | [227-231](../backend/app/repositories.py#L227-L231) | `get_open_by_card` | Kartın açık yolculuğu |
 | [233-243](../backend/app/repositories.py#L233-L243) | `list_open_by_bus` | Araçtaki yolcular, kart→yolcu ilişkisi önceden yüklü |
 | [245-263](../backend/app/repositories.py#L245-L263) | `list_by_cards` | Yolcunun tüm kartlarının yolculukları, **tek sorguda** sayfalanmış |
-| [265-271](../backend/app/repositories.py#L265-L271) | `count_open_by_bus` | `{bus_id: yolcu}` sözlüğü — canlı araç listesi bunu kullanır |
-| [279-285](../backend/app/repositories.py#L279-L285) | `count_by_status` | Durum→sayı |
-| [287-296](../backend/app/repositories.py#L287-L296) | `hourly_boardings` | Yerel saate göre 24'lük dağılım |
-| [298-307](../backend/app/repositories.py#L298-L307) | `daily_boardings` | Yerel güne göre dağılım |
-| [309-326](../backend/app/repositories.py#L309-L326) | `top_board_stops` | En çok biniş yapılan duraklar |
-| [328-339](../backend/app/repositories.py#L328-L339) | `hourly_by_line` | `(line_id, saat, sayı)` — hat zirve saati bundan çıkar |
-| [341-347](../backend/app/repositories.py#L341-L347) | `count_by_line` | Hat→toplam |
-| **[349-398](../backend/app/repositories.py#L349-L398)** | **`stop_usage`** | Aşağıda ayrıntılı |
-| [400-423](../backend/app/repositories.py#L400-L423) | `top_pairs` | `aliased(Stop)` ile **iki kez** `stops`'a JOIN; yalnız `COMPLETED` sayılır |
-| [425-431](../backend/app/repositories.py#L425-L431) | `count_by_card_type` | `card_type_snapshot`'a göre |
-| [433-446](../backend/app/repositories.py#L433-L446) | `recent` | Son N yolculuk, 5 ilişki önceden yüklü |
-| [448-454](../backend/app/repositories.py#L448-L454) | `list_due` | `status=OPEN` **ve** `auto_alight_at <= now` — otomatik iniş kuyruğu |
+| [264-270](../backend/app/repositories.py#L264-L270) | `count_open_by_bus` | `{bus_id: yolcu}` sözlüğü — canlı araç listesi bunu kullanır |
+| [278-284](../backend/app/repositories.py#L278-L284) | `count_by_status` | Durum→sayı |
+| [286-295](../backend/app/repositories.py#L286-L295) | `hourly_boardings` | Yerel saate göre 24'lük dağılım |
+| [297-306](../backend/app/repositories.py#L297-L306) | `daily_boardings` | Yerel güne göre dağılım |
+| [308-325](../backend/app/repositories.py#L308-L325) | `top_board_stops` | En çok biniş yapılan duraklar |
+| [327-338](../backend/app/repositories.py#L327-L338) | `hourly_by_line` | `(line_id, saat, sayı)` — hat zirve saati bundan çıkar |
+| [340-346](../backend/app/repositories.py#L340-L346) | `count_by_line` | Hat→toplam |
+| **[348-397](../backend/app/repositories.py#L348-L397)** | **`stop_usage`** | Aşağıda ayrıntılı |
+| [399-422](../backend/app/repositories.py#L399-L422) | `top_pairs` | `aliased(Stop)` ile **iki kez** `stops`'a JOIN; yalnız `COMPLETED` sayılır |
+| [424-430](../backend/app/repositories.py#L424-L430) | `count_by_card_type` | `card_type_snapshot`'a göre |
+| [432-445](../backend/app/repositories.py#L432-L445) | `recent` | Son N yolculuk, 5 ilişki önceden yüklü |
+| [447-453](../backend/app/repositories.py#L447-L453) | `list_due` | `status=OPEN` **ve** `auto_alight_at <= now` — otomatik iniş kuyruğu |
 
 #### `stop_usage` neden `union_all` kullanır?
 
@@ -502,25 +502,25 @@ Bir durak hem biniş hem iniş noktası olabilir. Tek sorguda `board_stop_id` ve
 `alight_stop_id` üzerinden iki kez JOIN yapılsa satırlar **çarpılırdı**
 (kartezyen etki). Çözüm:
 
-1. [357-365](../backend/app/repositories.py#L357-L365) — Binişler:
+1. [356-364](../backend/app/repositories.py#L356-L364) — Binişler:
    `(stop_id, boarding=COUNT, alighting=0)`
-2. [367-379](../backend/app/repositories.py#L367-L379) — İnişler:
+2. [366-378](../backend/app/repositories.py#L366-L378) — İnişler:
    `(stop_id, boarding=0, alighting=COUNT)`, `alight_stop_id IS NOT NULL` süzgeciyle
-3. [381](../backend/app/repositories.py#L381) — `union_all` ile alt sorguda birleştirilir
-4. [383-394](../backend/app/repositories.py#L383-L394) — `stops` ile JOIN, durak
+3. [380](../backend/app/repositories.py#L380) — `union_all` ile alt sorguda birleştirilir
+4. [382-393](../backend/app/repositories.py#L382-L393) — `stops` ile JOIN, durak
    bazında `SUM`, toplam kullanıma göre sıralama, `limit=12`
 
-[355](../backend/app/repositories.py#L355) satırındaki
+[354](../backend/app/repositories.py#L354) satırındaki
 `cast(literal(0), Integer)` gereklidir: iki kolun sütun tipleri birebir aynı
 olmazsa Postgres `UNION ALL`'ı reddeder.
 
-### `FavoriteRepository` — [457-472](../backend/app/repositories.py#L457-L472)
+### `FavoriteRepository` — [456-471](../backend/app/repositories.py#L456-L471)
 
 `hard_delete` kullanır — favori kaldırmak gerçekten silmektir.
 
 ---
 
-## B.7 `app/services.py` — 749 satır
+## B.7 `app/services.py` — 742 satır
 
 **Görevi:** İş kuralları ve işlem sınırı.
 
@@ -676,25 +676,25 @@ Yeni `Trip` üretir. İki önemli damga:
 `close_due` üç yerden çağrılır: arkaplan görevi (5 sn), `validate` başında ve
 geçmiş/aktif okumalarında. Böylece hiçbir okuma bayat veri görmez.
 
-### `StatsService` — [527-749](../backend/app/services.py#L527-L749)
+### `StatsService` — [527-742](../backend/app/services.py#L527-L742)
 
 | Satır | Metod | Açıklama |
 |---|---|---|
 | [534-544](../backend/app/services.py#L534-L544) | `occupancy` | Araç başına yolcu sayısı |
 | [546-568](../backend/app/services.py#L546-L568) | `occupancy_detail` | Araçtaki yolcuların listesi |
-| [570-572](../backend/app/services.py#L570-L572) | `_since` | `now - days` |
-| [574-590](../backend/app/services.py#L574-L590) | `summary` | `/admin/stats` — `overview` ile büyük ölçüde örtüşür ([Bölüm I](#i-bilinen-tuhaflıklar-ve-teknik-borç)) |
-| [594-613](../backend/app/services.py#L594-L613) | `overview` | **`open_trips` penceresizdir** ([598](../backend/app/services.py#L598)) — "şu an araçta" geçmiş aralıkla sınırlanamaz. [612](../backend/app/services.py#L612) 24 saati sıfırlarla doldurur ki grafikte boşluk olmasın |
-| [615-659](../backend/app/services.py#L615-L659) | `line_analytics` | [Bölüm C.2](#c2-analitik-formülleri) |
-| [661-678](../backend/app/services.py#L661-L678) | `stop_analytics` | En yoğun durağa göre orantı |
-| [680-684](../backend/app/services.py#L680-L684) | `stop_pairs` | |
-| [686-711](../backend/app/services.py#L686-L711) | `daily_trend` | Dönem ilk yarı ↔ ikinci yarı karşılaştırması |
-| [713-722](../backend/app/services.py#L713-L722) | `card_type_shares` | **Üç tipi de** döndürür, sıfır olanlar dahil — grafik lejantı sabit kalsın |
-| [724-749](../backend/app/services.py#L724-L749) | `recent_trips` | Süreyi dakikaya çevirir, en az 1 dk |
+| [571-572](../backend/app/services.py#L571-L572) | `_since` | `now - days` |
+| [574-591](../backend/app/services.py#L574-L591) | `summary` | `/admin/stats` — `overview` ile büyük ölçüde örtüşür ([Bölüm I](#i-bilinen-tuhaflıklar-ve-teknik-borç)) |
+| [594-611](../backend/app/services.py#L594-L611) | `overview` | **`open_trips` penceresizdir** ([597](../backend/app/services.py#L597)) — "şu an araçta" geçmiş aralıkla sınırlanamaz. [610](../backend/app/services.py#L610) 24 saati sıfırlarla doldurur ki grafikte boşluk olmasın |
+| [613-657](../backend/app/services.py#L613-L657) | `line_analytics` | [Bölüm C.2](#c2-analitik-formülleri) |
+| [659-676](../backend/app/services.py#L659-L676) | `stop_analytics` | En yoğun durağa göre orantı |
+| [678-682](../backend/app/services.py#L678-L682) | `stop_pairs` | |
+| [684-704](../backend/app/services.py#L684-L704) | `daily_trend` | Dönem ilk yarı ↔ ikinci yarı karşılaştırması |
+| [706-715](../backend/app/services.py#L706-L715) | `card_type_shares` | **Üç tipi de** döndürür, sıfır olanlar dahil — grafik lejantı sabit kalsın |
+| [717-742](../backend/app/services.py#L717-L742) | `recent_trips` | Süreyi dakikaya çevirir, en az 1 dk |
 
 ---
 
-## B.8 `app/simulation.py` — 143 satır
+## B.8 `app/simulation.py` — 134 satır
 
 **Görevi:** Araç konumunu **duvar saatinden deterministik** hesaplamak. Hiçbir
 durum saklanmaz; sunucu yeniden başlasa da aynı anda aynı sonucu verir.
@@ -722,24 +722,24 @@ Değişmez (`frozen=True`) veri sınıfı: `from_index`, `to_index`, `at_stop`,
 | [39-40](../backend/app/simulation.py#L39-L40) | `opposite` | Yön çevirici |
 | [43-63](../backend/app/simulation.py#L43-L63) | `_on_route` | Döngü içi konumdan durak indeksi çıkarır. [50-51](../backend/app/simulation.py#L50-L51): `departure = arrival + DWELL`; `at_stop = pos < departure`. [59](../backend/app/simulation.py#L59): kalan süre **en az 1** dakika gösterilir |
 | [66-76](../backend/app/simulation.py#L66-L76) | `_at_layover` | Mola konumu; `layover=True`, `at_stop=False` → biniş kapalı |
-| [79-113](../backend/app/simulation.py#L79-L113) | `round_trip_position` | Aşağıda |
-| [116-118](../backend/app/simulation.py#L116-L118) | `terminus_moment` | Sim-dakikayı **gerçek zamana** çevirir: `now + minutes/SIM_SPEED`. `auto_alight_at` bundan üretilir |
-| [121-135](../backend/app/simulation.py#L121-L135) | `peak_hours` | En yoğun saatleri sıralar; [132](../backend/app/simulation.py#L132) **komşu saatleri eler** (`abs(fark) <= 1`) — yoksa "08:00 ve 09:00" gibi bitişik iki tepe seçilirdi. Varsayılan 2 tepe |
-| [138-143](../backend/app/simulation.py#L138-L143) | `load_level` | `ratio < low → "low"`, `> high → "high"`, aksi `"normal"`. Eşikler çağırandan gelir |
+| [79-104](../backend/app/simulation.py#L79-L104) | `round_trip_position` | Aşağıda |
+| [107-109](../backend/app/simulation.py#L107-L109) | `terminus_moment` | Sim-dakikayı **gerçek zamana** çevirir: `now + minutes/SIM_SPEED`. `auto_alight_at` bundan üretilir |
+| [112-126](../backend/app/simulation.py#L112-L126) | `peak_hours` | En yoğun saatleri sıralar; [123](../backend/app/simulation.py#L123) **komşu saatleri eler** (`abs(fark) <= 1`) — yoksa "08:00 ve 09:00" gibi bitişik iki tepe seçilirdi. Varsayılan 2 tepe |
+| [129-134](../backend/app/simulation.py#L129-L134) | `load_level` | `ratio < low → "low"`, `> high → "high"`, aksi `"normal"`. Eşikler çağırandan gelir |
 
 ### `round_trip_position` — döngü mantığı
 
 ```python
-legs   = [(başlangıç yönü, tablo), (ters yön, tablo)]     # 95-96
-cycle  = Σ(her bacağın toplam süresi) + LAYOVER_MIN × 2   # 100
-offset = bus_index × cycle / bus_count                    # 102
-pos    = (sim_minutes(now) − offset) mod cycle            # 103
+legs   = [(başlangıç yönü, tablo), (ters yön, tablo)]      # 86
+cycle  = Σ(her bacağın toplam süresi) + LAYOVER_MIN × 2    # 91
+offset = bus_index × cycle / bus_count                     # 93
+pos    = (sim_minutes(now) − offset) mod cycle             # 94
 
-for (yön, tablo) in legs:                                 # 105
-    if pos < tablo[-1]:  return _on_route(pos, tablo, yön) # 106-107
-    pos -= tablo[-1]                                      # 108
-    if pos < LAYOVER_MIN: return _at_layover(...)         # 109-110
-    pos -= LAYOVER_MIN                                    # 111
+for (yön, tablo) in legs:                                  # 96
+    if pos < tablo[-1]:  return _on_route(pos, tablo, yön) # 97-98
+    pos -= tablo[-1]                                       # 99
+    if pos < LAYOVER_MIN: return _at_layover(...)          # 100-101
+    pos -= LAYOVER_MIN                                     # 102
 ```
 
 Bir tam döngü: **gidiş → mola → dönüş → mola → (baştan)**.
@@ -811,7 +811,7 @@ Haraççı'ya `ceil(27 − 24) = 3` sim-dakika var → biniş kapalı.
 
 ---
 
-## B.10 `app/routes.py` — 292 satır
+## B.10 `app/routes.py` — 289 satır
 
 **Görevi:** HTTP sözleşmesi. İş kuralı içermez; her fonksiyon bir servise
 devreder.
@@ -841,14 +841,14 @@ admin_router      = APIRouter(prefix="/admin", …,
 | [88-90](../backend/app/routes.py#L88-L90) | `logout` | Yalnızca çerezi siler. **Sunucuda token iptali yapmaz** |
 | [124-130](../backend/app/routes.py#L124-L130) | `get_line` | `direction` sorgu parametresi, varsayılan `forward` |
 | [133-136](../backend/app/routes.py#L133-L136) | `line_buses` | Canlı konumlar |
-| [164-171](../backend/app/routes.py#L164-L171) | `trip_history` | `limit` üst sınırı 100 |
-| [174-176](../backend/app/routes.py#L174-L176) | `active_trip` | `TripDetail` ya da `null` — açık yolculuk yoksa `null` |
-| [179-181](../backend/app/routes.py#L179-L181) | `validate` | Tek gövde alanı: `bus_id` |
-| [283-292](../backend/app/routes.py#L283-L292) | `routers` | `main.py`'nin döngüyle bağladığı liste |
+| [163-170](../backend/app/routes.py#L163-L170) | `trip_history` | `limit` üst sınırı 100 |
+| [173-175](../backend/app/routes.py#L173-L175) | `active_trip` | `TripDetail` ya da `null` — açık yolculuk yoksa `null` |
+| [178-180](../backend/app/routes.py#L178-L180) | `validate` | Tek gövde alanı: `bus_id` |
+| [280-289](../backend/app/routes.py#L280-L289) | `routers` | `main.py`'nin döngüyle bağladığı liste |
 
 ---
 
-## B.11 `app/main.py` — 120 satır
+## B.11 `app/main.py` — 118 satır
 
 **Görevi:** Uygulama nesnesi, arkaplan görevi, hata çevirisi, `/admin` sayfa
 koruması ve statik dosya servisi.
@@ -856,17 +856,17 @@ koruması ve statik dosya servisi.
 | Satır | Blok | Açıklama |
 |---|---|---|
 | [21](../backend/app/main.py#L21) | `WEB_ROOT` | `public/` |
-| [22-25](../backend/app/main.py#L22-L25) | `ADMIN_PAGE` | `private/admin.html`. **Yorumdaki gerekçe:** `public/` altında olsaydı `/admin.html` adresini `StaticFiles` doğrudan servis eder ve yetki kontrolü tamamen atlanırdı |
-| [28](../backend/app/main.py#L28) | `AUTO_CLOSE_INTERVAL = 5` | Saniye |
-| [31-42](../backend/app/main.py#L31-L42) | `_auto_close_loop` | Sonsuz döngü; her turda **yeni oturum** açar, `asyncio.to_thread` ile senkron çağrıyı olay döngüsünden çıkarır, `finally` ile kapatır. [41-42](../backend/app/main.py#L41-L42) tüm istisnalar yutulur — bir hata döngüyü öldürmemeli |
-| [45-53](../backend/app/main.py#L45-L53) | `lifespan` | Açılışta görevi başlatır, kapanışta iptal edip `CancelledError`'ı bastırır |
-| [56-62](../backend/app/main.py#L56-L62) | `app` | `docs_url="/docs"`, `openapi_url="/api/v1/openapi.json"` |
-| [64-70](../backend/app/main.py#L64-L70) | CORS | `allow_credentials=False` + `allow_origins=["*"]`. Web aynı origin'den servis edildiği için CORS'a ihtiyacı yoktur; bu ayar yalnızca mobil/harici istemciler içindir |
-| [73-75](../backend/app/main.py#L73-L75) | Hata işleyici | Her `AppError`'ı `{"detail": mesaj}` + doğru durum koduna çevirir. Servisler HTTP bilmeden Türkçe hata fırlatabilir |
-| [78-86](../backend/app/main.py#L78-L86) | `/health` | `SELECT 1` dener; başarısızsa `database: "down"` ama **yanıt yine 200** |
-| **[89-114](../backend/app/main.py#L89-L114)** | **`/admin`** | Dört aşamalı kontrol → [Bölüm D.4](#d4-admin-sayfasının-korunması) |
-| [117-118](../backend/app/main.py#L117-L118) | Router bağlama | Hepsi `/api/v1` önekiyle |
-| [120](../backend/app/main.py#L120) | `StaticFiles` | **En sonda** `/` köküne bağlanır, `html=True` |
+| [23](../backend/app/main.py#L23) | `ADMIN_PAGE` | `private/admin.html` — **statik kökün dışında.** `public/` altında olsaydı `/admin.html` adresini `StaticFiles` doğrudan servis eder ve aşağıdaki yetki kontrolü tamamen atlanırdı |
+| [26](../backend/app/main.py#L26) | `AUTO_CLOSE_INTERVAL = 5` | Saniye |
+| [29-40](../backend/app/main.py#L29-L40) | `_auto_close_loop` | Sonsuz döngü; her turda **yeni oturum** açar, `asyncio.to_thread` ile senkron çağrıyı olay döngüsünden çıkarır, `finally` ile kapatır. Son iki satırda tüm istisnalar yutulur — bir hata döngüyü öldürmemeli |
+| [43-51](../backend/app/main.py#L43-L51) | `lifespan` | Açılışta görevi başlatır, kapanışta iptal edip `CancelledError`'ı bastırır |
+| [54-60](../backend/app/main.py#L54-L60) | `app` | `docs_url="/docs"`, `openapi_url="/api/v1/openapi.json"` |
+| [62-68](../backend/app/main.py#L62-L68) | CORS | `allow_credentials=False` + `allow_origins=["*"]`. Web aynı origin'den servis edildiği için CORS'a ihtiyacı yoktur; bu ayar yalnızca mobil/harici istemciler içindir |
+| [71-73](../backend/app/main.py#L71-L73) | Hata işleyici | Her `AppError`'ı `{"detail": mesaj}` + doğru durum koduna çevirir. Servisler HTTP bilmeden Türkçe hata fırlatabilir |
+| [76-84](../backend/app/main.py#L76-L84) | `/health` | `SELECT 1` dener; başarısızsa `database: "down"` ama **yanıt yine 200** |
+| **[87-112](../backend/app/main.py#L87-L112)** | **`/admin`** | Dört aşamalı kontrol → [Bölüm D.4](#d4-admin-sayfasının-korunması) |
+| [115-116](../backend/app/main.py#L115-L116) | Router bağlama | Hepsi `/api/v1` önekiyle |
+| [118](../backend/app/main.py#L118) | `StaticFiles` | **En sonda** `/` köküne bağlanır, `html=True` |
 
 > ⚠️ **Sıra kritiktir.** `StaticFiles` `/` köküne bağlandığı için her yolu
 > yakalar. Router'lar ondan **önce** bağlanmazsa `/api/v1/*` istekleri statik
@@ -874,7 +874,7 @@ koruması ve statik dosya servisi.
 
 ---
 
-## B.12 `app/seed.py` — 187 satır
+## B.12 `app/seed.py` — 188 satır
 
 **Görevi:** `lines.json`'daki hat/durak/otobüs verisini veritabanına yüklemek ve
 yönetici hesabı oluşturmak. **Yeniden çalıştırılabilir** (idempotent).
@@ -910,7 +910,7 @@ yönetici hesabı oluşturmak. **Yeniden çalıştırılabilir** (idempotent).
 
 ---
 
-## B.13 `app/demo_seed.py` — 211 satır
+## B.13 `app/demo_seed.py` — 210 satır
 
 **Görevi:** Analitik ekranlarını dolu görebilmek için 14 günlük sahte yolculuk
 üretmek. Üretim aracı değildir.
@@ -1032,16 +1032,16 @@ engelleyemediği için kısıt burada.
 
 ## C.2 Analitik formülleri
 
-### Hat yoğunluğu — [services.py:615-659](../backend/app/services.py#L615-L659)
+### Hat yoğunluğu — [services.py:613-657](../backend/app/services.py#L613-L657)
 
 ```
 1. by_line_hour = hourly_by_line(since)                    # (hat, saat, sayı)
-2. peaks[hat]   = en yüksek sayının saati ve değeri              (620-623)
-3. bus_counts[hat] = aktif araç sayısı                           (625-627)
-4. daily_peak   = peak_total / days                              (634)
-5. per_bus      = daily_peak / aktif_araç  (araç yoksa daily_peak) (636)
-6. level        = load_level(per_bus / BUS_CAPACITY, 0.40, 0.75)  (637)
-7. sonuç per_bus'a göre azalan sıralanır                         (658)
+2. peaks[hat]   = en yüksek sayının saati ve değeri              (618-621)
+3. bus_counts[hat] = aktif araç sayısı                           (623-625)
+4. daily_peak   = peak_total / days                              (632)
+5. per_bus      = daily_peak / aktif_araç  (araç yoksa daily_peak) (634)
+6. level        = load_level(per_bus / BUS_CAPACITY, 0.40, 0.75)  (635)
+7. sonuç per_bus'a göre azalan sıralanır                         (656)
 ```
 
 | `per_bus / 40` | Seviye | Öneri |
@@ -1053,21 +1053,21 @@ engelleyemediği için kısıt burada.
 **Örnek:** 7 günde zirve saatte 420 biniş, 3 aktif araç, `BUS_CAPACITY=40`.
 `daily_peak = 420/7 = 60` → `per_bus = 60/3 = 20` → `20/40 = 0.5` → **normal**.
 
-### Durak yoğunluğu — [services.py:661-678](../backend/app/services.py#L661-L678)
+### Durak yoğunluğu — [services.py:659-676](../backend/app/services.py#L659-L676)
 
 ```
-busiest = max(biniş + iniş)                                   # 666, sıfırsa 1
-level   = load_level((biniş+iniş) / busiest, 0.35, 0.70)      # 675
+busiest = max(biniş + iniş)                                   # 664, sıfırsa 1
+level   = load_level((biniş+iniş) / busiest, 0.35, 0.70)      # 673
 ```
 
 Mutlak değil, **göreli** ölçüttür: en yoğun durak her zaman kırmızıdır.
 
-### Günlük trend — [services.py:686-711](../backend/app/services.py#L686-L711)
+### Günlük trend — [services.py:684-704](../backend/app/services.py#L684-L704)
 
 ```
 counts = günlük biniş sayıları
-half   = len(counts) // 2                                          # 698
-change = (ort(ikinci_yarı) − ort(ilk_yarı)) / ort(ilk_yarı) × 100  # 703
+half   = len(counts) // 2                                          # 691
+change = (ort(ikinci_yarı) − ort(ilk_yarı)) / ort(ilk_yarı) × 100  # 696
 ```
 
 En az 2 gün gerekir ve ilk yarının toplamı sıfır olmamalıdır; aksi hâlde
@@ -1131,16 +1131,16 @@ bile bir sonraki meşru tazelemede ölür.
 
 ## D.4 `/admin` sayfasının korunması
 
-[main.py:89-114](../backend/app/main.py#L89-L114) — dört aşama, her biri
+[main.py:87-112](../backend/app/main.py#L87-L112) — dört aşama, her biri
 başarısızlıkta `303 → /`:
 
 ```
-95-96   çerez var mı
-98-101  imza geçerli mi
-103-106 sub geçerli UUID mi
-108-109 yolcu var mı ve is_admin mi
-111-112 token sürümü güncel mi
-114     FileResponse(private/admin.html)
+92-94    fallback tanımlanır, çerez yoksa dönülür
+96-99    imza geçerli mi
+101-104  sub geçerli UUID mi
+106-107  yolcu var mı ve is_admin mi
+109-110  token sürümü güncel mi
+112      FileResponse(private/admin.html)
 ```
 
 **Üç katmanlı yetki:**
@@ -1601,7 +1601,7 @@ Betik sırası ([109-113](../public/panel.html#L109-L113)):
 `chart.umd.js → api.js → auth.js → charts.js → panel.js` — bağımlılık sırasıdır,
 değiştirilmemelidir.
 
-### `private/admin.html` (147 satır)
+### `private/admin.html` (146 satır)
 
 | Element `id` | Dolduran |
 |---|---|
