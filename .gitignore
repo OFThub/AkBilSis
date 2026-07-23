@@ -9,5 +9,7 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
-docs/
+
+# docs/ artık yok sayılmıyor: kullanıcı kılavuzu, API/mimari dökümanı ve
+# kullanım senaryosu orada durur ve depoyla birlikte dağıtılır.
 .remember/
