@@ -245,7 +245,6 @@ class TripRepository(BaseRepository[Trip]):
     def list_by_cards(
         self, card_ids: Sequence[uuid.UUID], skip: int = 0, limit: int = 50
     ) -> Sequence[Trip]:
-        """Yolcunun tüm kartlarının yolculukları, tek sorguda sayfalanmış."""
         if not card_ids:
             return []
         stmt = (

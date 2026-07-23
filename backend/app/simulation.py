@@ -83,15 +83,6 @@ def round_trip_position(
     now: datetime,
     start: Direction = Direction.FORWARD,
 ) -> LivePosition:
-    """Gidiş ve dönüşü tek döngüde birleştirir.
-
-    Araç son durağa varınca molaya çekilir, sonra ters yönün güzergâhından geri
-    döner ve döngü baştan başlar. Yön saatten türetilir, saklanmaz: sunucu
-    yeniden başlasa da aynı anda aynı yön çıkar.
-
-    `start` aracın sefere hangi yönden başladığıdır (`Bus.direction`); o anki
-    yön dönen `LivePosition.direction` alanındadır.
-    """
     legs = [(d, schedules.get(d) or []) for d in (start, opposite(start))]
     legs = [(d, arrival) for d, arrival in legs if len(arrival) > 1]
     if not legs:

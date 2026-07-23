@@ -132,7 +132,6 @@ def get_line(
 
 @transit_router.get("/lines/{line_id}/buses", response_model=list[BusLive])
 def line_buses(line_id: uuid.UUID, db: DbSession):
-    """Hattın canlı araç konumları — konum sunucuda hesaplanır."""
     return TransitService(db).live_buses(line_id)
 
 
@@ -245,7 +244,6 @@ def admin_analytics_overview(db: DbSession, days: int = Query(default=7, ge=1, l
 
 @admin_router.get("/analytics/lines", response_model=list[LineAnalytics])
 def admin_analytics_lines(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
-    """Hat başına yoğunluk ve sefer artır/azalt önerisi."""
     return StatsService(db).line_analytics(days)
 
 
@@ -256,7 +254,6 @@ def admin_analytics_stops(db: DbSession, days: int = Query(default=7, ge=1, le=9
 
 @admin_router.get("/analytics/pairs", response_model=list[StopPair])
 def admin_analytics_pairs(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
-    """En yoğun güzergâhlar — hangi duraklar arası en çok yolculuk yapılıyor."""
     return StatsService(db).stop_pairs(days)
 
 
