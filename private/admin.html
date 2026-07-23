@@ -56,6 +56,15 @@
       </article>
 
       <article class="card wide">
+        <h2>Günlük talep trendi</h2>
+        <p class="card-sub">
+          Seçili dönemde gün gün biniş sayısı.
+          <span id="trendSummary" class="trend-summary"></span>
+        </p>
+        <div class="chart-box"><canvas id="dailyChart" role="img" aria-label="Gün bazında biniş sayısı çizgi grafiği"></canvas></div>
+      </article>
+
+      <article class="card wide">
         <h2>Hat yoğunluğu ve sefer önerisi</h2>
         <p class="card-sub">
           Ölçüt: hattın en yoğun saatinde <strong>araç başına düşen yolcu</strong>.
@@ -76,8 +85,8 @@
       </article>
 
       <article class="card">
-        <h2>Tam / öğrenci dağılımı</h2>
-        <p class="card-sub">Yolculuk anındaki kart statüsüne göre</p>
+        <h2>Kart tipi dağılımı</h2>
+        <p class="card-sub">Tam, öğrenci ve 65+ — yolculuk anındaki kart statüsüne göre</p>
         <div class="chart-box donut"><canvas id="cardTypeChart" role="img" aria-label="Kart tipi dağılımı halka grafiği"></canvas></div>
       </article>
 

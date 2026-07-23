@@ -773,3 +773,8 @@ a:focus-visible {
   .topnav { margin-left: 0; width: 100%; }
   .session-block { margin-left: 0; width: 100%; justify-content: space-between; }
 }
+
+/* Günlük trend özeti — kart alt başlığının yanında */
+.trend-summary { color: var(--ink-3, #5b6474); font-weight: 600; }
+.trend-summary.is-up { color: #1d7a43; }
+.trend-summary.is-down { color: #b3261e; }

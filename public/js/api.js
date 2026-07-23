@@ -81,6 +81,7 @@ const api = {
     stops: () => request("/admin/analytics/stops"),
     pairs: () => request("/admin/analytics/pairs"),
     cardTypes: () => request("/admin/analytics/card-types"),
+    daily: () => request("/admin/analytics/daily"),
     recentTrips: (limit = 20) => request(`/admin/trips?limit=${limit}`),
   },
 };

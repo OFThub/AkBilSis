@@ -16,6 +16,7 @@ from app.schemas import (
     CardLinkRequest,
     CardRead,
     CardTypeShare,
+    DailyTrend,
     CardTypeUpdate,
     FavoriteCreate,
     FavoriteRead,
@@ -257,6 +258,11 @@ def admin_analytics_stops(db: DbSession, days: int = Query(default=7, ge=1, le=9
 def admin_analytics_pairs(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
     """En yoğun güzergâhlar — hangi duraklar arası en çok yolculuk yapılıyor."""
     return StatsService(db).stop_pairs(days)
+
+
+@admin_router.get("/analytics/daily", response_model=DailyTrend)
+def admin_analytics_daily(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
+    return StatsService(db).daily_trend(days)
 
 
 @admin_router.get("/analytics/card-types", response_model=list[CardTypeShare])

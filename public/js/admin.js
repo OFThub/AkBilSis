@@ -190,13 +190,42 @@ function renderRecent(trips) {
   }
 }
 
+function renderDaily(trend) {
+  setDailyTrend(charts.daily, trend.days || []);
+
+  const summary = document.getElementById("trendSummary");
+  if (!summary) return;
+
+  if (!trend.days || trend.days.length === 0) {
+    summary.textContent = "";
+    summary.className = "trend-summary";
+    return;
+  }
+
+  const parts = [`Günlük ortalama ${trend.daily_average} biniş`];
+  if (trend.busiest_day) parts.push(`en yoğun gün ${dayLabel(trend.busiest_day)}`);
+
+  // Yön bilgisi olmadan ortalama tek başına bir şey söylemez: dönemin ilk
+  // yarısına göre artış mı düşüş mü olduğu belediyenin asıl sorusudur
+  let tone = "";
+  if (trend.change_percent !== null && trend.change_percent !== undefined) {
+    const up = trend.change_percent >= 0;
+    parts.push(`${up ? "↑" : "↓"} %${Math.abs(trend.change_percent)} ${up ? "artış" : "düşüş"}`);
+    tone = up ? " is-up" : " is-down";
+  }
+
+  summary.textContent = `· ${parts.join(" · ")}`;
+  summary.className = "trend-summary" + tone;
+}
+
 async function refresh() {
-  const [overview, lines, stops, pairs, cardTypes, recent] = await Promise.all([
+  const [overview, lines, stops, pairs, cardTypes, daily, recent] = await Promise.all([
     api.admin.overview(),
     api.admin.lines(),
     api.admin.stops(),
     api.admin.pairs(),
     api.admin.cardTypes(),
+    api.admin.daily(),
     api.admin.recentTrips(20),
   ]);
 
@@ -205,6 +234,7 @@ async function refresh() {
   renderStops(stops);
   renderPairs(pairs);
   renderCardTypes(cardTypes);
+  renderDaily(daily);
   renderRecent(recent);
 
   document.getElementById("refreshedAt").textContent =
@@ -218,6 +248,7 @@ async function main() {
     hourly: hourlyChart(document.getElementById("hourlyChart")),
     stops: horizontalBar(document.getElementById("stopsChart"), "kullanım"),
     cardTypes: donutChart(document.getElementById("cardTypeChart")),
+    daily: dailyTrendChart(document.getElementById("dailyChart")),
   };
 
   await refresh();

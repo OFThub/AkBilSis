@@ -79,6 +79,51 @@ function hourlyChart(canvas, options = {}) {
   });
 }
 
+/** Günlük trend — talebin dönem içinde artıp azaldığını gösterir */
+function dailyTrendChart(canvas) {
+  return new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: "Biniş",
+          data: [],
+          borderColor: BLUE,
+          backgroundColor: "rgba(36, 86, 166, 0.14)",
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (item) => ` ${item.parsed.y} biniş` } },
+      },
+      scales: recessiveScales,
+    },
+  });
+}
+
+/** Gün etiketi: 2026-07-23 -> 23 Tem */
+const TR_MONTHS = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+function dayLabel(iso) {
+  const [y, m, d] = String(iso).split("-").map(Number);
+  if (!y || !m || !d) return String(iso);
+  return `${d} ${TR_MONTHS[m - 1]}`;
+}
+
+function setDailyTrend(chart, days) {
+  chart.data.labels = days.map((row) => dayLabel(row.day));
+  chart.data.datasets[0].data = days.map((row) => row.count);
+  chart.update();
+}
+
 /** Yatay çubuk — durak ve hat adları uzun olduğu için etiketler yanda durur */
 function horizontalBar(canvas, unit) {
   return new Chart(canvas, {

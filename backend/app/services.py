@@ -37,6 +37,8 @@ from app.schemas import (
     BusOccupancy,
     BusOccupancyDetail,
     CardTypeShare,
+    DailyBoarding,
+    DailyTrend,
     HourlyBoarding,
     LineAnalytics,
     LineLiveStatus,
@@ -680,6 +682,33 @@ class StatsService:
             StopPair(board_stop=a, alight_stop=b, count=count)
             for a, b, count in self.trips.top_pairs(since=self._since(days))
         ]
+
+    def daily_trend(self, days: int = 7) -> DailyTrend:
+        """Gun gun binis sayisi ve donem basi/sonu arasindaki degisim.
+
+        Saatlik dagilimdan farkli bir soruya cevap verir: talep artiyor mu,
+        azaliyor mu.
+        """
+        rows = self.trips.daily_boardings(since=self._since(days))
+        counts = [c for _, c in rows]
+        total = sum(counts)
+
+        change = None
+        if len(rows) >= 2:
+            half = len(counts) // 2
+            first, second = counts[:half], counts[half:]
+            if first and sum(first):
+                avg_first = sum(first) / len(first)
+                avg_second = sum(second) / len(second)
+                change = round((avg_second - avg_first) / avg_first * 100, 1)
+
+        return DailyTrend(
+            days=[DailyBoarding(day=d, count=c) for d, c in rows],
+            total=total,
+            daily_average=round(total / len(rows), 1) if rows else 0.0,
+            busiest_day=max(rows, key=lambda r: r[1])[0] if rows else None,
+            change_percent=change,
+        )
 
     def card_type_shares(self, days: int = 7) -> list[CardTypeShare]:
         counts = self.trips.count_by_card_type(since=self._since(days))
