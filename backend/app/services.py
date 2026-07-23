@@ -594,7 +594,6 @@ class StatsService:
     def overview(self, days: int = 7) -> AnalyticsOverview:
         since = self._since(days)
         windowed = self.trips.count_by_status(since=since)
-        # "Şu an araçta" penceresizdir: geçmiş aralıkla sınırlanamaz
         open_now = self.trips.count_by_status().get(TripStatus.OPEN.value, 0)
         hourly = self.trips.hourly_boardings(since=since)
         by_hour = dict(hourly)
@@ -608,7 +607,6 @@ class StatsService:
             active_buses=len(self.buses.list_active()),
             onboard_passengers=open_now,
             busiest_hour=busiest,
-            # Grafikte boş saatler de görünsün diye 24 saat tam doldurulur
             hourly=[HourlyBoarding(hour=h, count=by_hour.get(h, 0)) for h in range(24)],
         )
 
@@ -684,11 +682,6 @@ class StatsService:
         ]
 
     def daily_trend(self, days: int = 7) -> DailyTrend:
-        """Gun gun binis sayisi ve donem basi/sonu arasindaki degisim.
-
-        Saatlik dagilimdan farkli bir soruya cevap verir: talep artiyor mu,
-        azaliyor mu.
-        """
         rows = self.trips.daily_boardings(since=self._since(days))
         counts = [c for _, c in rows]
         total = sum(counts)
