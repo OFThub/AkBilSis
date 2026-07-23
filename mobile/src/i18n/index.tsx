@@ -33,6 +33,7 @@ const tr = {
   cardTypeLabel: "Kart Tipi",
   cardTypeNormalHint: "Standart yolcu",
   cardTypeStudentHint: "Belge ile doğrulanır",
+  cardTypeSeniorHint: "65 yaş ve üzeri",
   cardTypeNote:
     "Öğrenci kartı için belgenizi belediyeye ibraz etmeniz gerekir; doğrulanmazsa kartınız tam tarifeye çevrilir.",
 
@@ -130,6 +131,7 @@ const en: Record<TranslationKey, string> = {
   cardTypeLabel: "Card Type",
   cardTypeNormalHint: "Standard fare",
   cardTypeStudentHint: "Verified by document",
+  cardTypeSeniorHint: "Age 65 and over",
   cardTypeNote:
     "Student cards require proof of enrolment at the municipality; without it the card reverts to the standard fare.",
 

@@ -207,6 +207,19 @@ class HourlyBoarding(BaseModel):
     count: int
 
 
+class DailyBoarding(BaseModel):
+    day: str
+    count: int
+
+
+class DailyTrend(BaseModel):
+    days: list[DailyBoarding] = []
+    total: int
+    daily_average: float
+    busiest_day: str | None
+    change_percent: float | None
+
+
 class StopBoarding(BaseModel):
     stop_id: uuid.UUID
     stop_name: str

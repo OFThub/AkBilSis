@@ -142,6 +142,7 @@ export default function AuthScreen() {
                   [
                     { value: "normal", hint: "cardTypeNormalHint" },
                     { value: "student", hint: "cardTypeStudentHint" },
+                    { value: "senior", hint: "cardTypeSeniorHint" },
                   ] as const
                 ).map((option) => {
                   const active = cardType === option.value;
@@ -235,9 +236,10 @@ function makeStyles(palette: Palette) {
       color: palette.ink3,
       marginBottom: 6,
     },
-    cardTypeRow: { flexDirection: "row", gap: 10 },
+    cardTypeRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
     cardTypeBox: {
-      flex: 1,
+      flexGrow: 1,
+      flexBasis: 96,
       borderWidth: 1,
       borderColor: palette.line,
       borderRadius: radius.control,

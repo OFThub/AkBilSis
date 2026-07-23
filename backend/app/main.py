@@ -19,6 +19,10 @@ from app.routes import routers
 from app.services import TripService
 
 WEB_ROOT = Path(__file__).resolve().parent.parent.parent / "public"
+# Yonetim sayfasi statik kokun DISINDA durur: public/ altinda olsaydi
+# /admin.html adresi StaticFiles tarafindan dogrudan servis edilir ve
+# asagidaki yetki kontrolu tamamen atlanirdi.
+ADMIN_PAGE = Path(__file__).resolve().parent.parent.parent / "private" / "admin.html"
 
 
 AUTO_CLOSE_INTERVAL = 5
@@ -107,7 +111,7 @@ def admin_page(
     if payload.get("ver") != passenger.token_version:
         return fallback
 
-    return FileResponse(WEB_ROOT / "admin.html")
+    return FileResponse(ADMIN_PAGE)
 
 
 for router in routers:

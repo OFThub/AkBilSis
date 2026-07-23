@@ -295,6 +295,17 @@ class TripRepository(BaseRepository[Trip]):
         )
         return [(int(h), c) for h, c in self.db.execute(stmt).all()]
 
+    def daily_boardings(
+        self, since: datetime | None = None, until: datetime | None = None
+    ) -> list[tuple[str, int]]:
+        day = func.date(func.timezone(settings.analytics_timezone, Trip.boarded_at))
+        stmt = (
+            self._in_range(select(day, func.count(Trip.id)), since, until)
+            .group_by(day)
+            .order_by(day)
+        )
+        return [(str(d), c) for d, c in self.db.execute(stmt).all()]
+
     def top_board_stops(
         self,
         limit: int = 10,
