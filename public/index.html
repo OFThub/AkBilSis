@@ -61,6 +61,31 @@
           <input type="password" name="password" autocomplete="new-password" minlength="8" required />
           <small>En az 8 karakter.</small>
         </label>
+
+        <fieldset class="field card-type">
+          <legend>Kart Tipi</legend>
+          <div class="card-type-options">
+            <label class="card-type-option">
+              <input type="radio" name="card_type" value="normal" checked />
+              <span class="card-type-box">
+                <strong>Tam</strong>
+                <small>Standart yolcu</small>
+              </span>
+            </label>
+            <label class="card-type-option">
+              <input type="radio" name="card_type" value="student" />
+              <span class="card-type-box">
+                <strong>Öğrenci</strong>
+                <small>Belge ile doğrulanır</small>
+              </span>
+            </label>
+          </div>
+          <small>
+            Öğrenci kartı için belgenizi belediyeye ibraz etmeniz gerekir;
+            doğrulanmazsa kartınız tam tarifeye çevrilir.
+          </small>
+        </fieldset>
+
         <button type="submit" class="btn-primary">Hesap Oluştur</button>
       </form>
 
@@ -128,7 +153,7 @@
       event.preventDefault();
       clearMessage();
       submit(registerForm, async (data) => {
-        await api.register(data.full_name, data.email, data.password);
+        await api.register(data.full_name, data.email, data.password, data.card_type);
         // Kayıt sonrası doğrudan içeri al — kullanıcı bilgilerini bir daha yazmasın
         await api.login(data.email, data.password);
         location.href = "panel.html";

@@ -54,10 +54,10 @@ async function request(path, options = {}) {
 }
 
 const api = {
-  register: (full_name, email, password) =>
+  register: (full_name, email, password, card_type = "normal") =>
     request("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ full_name, email, password }),
+      body: JSON.stringify({ full_name, email, password, card_type }),
     }),
 
   login: (email, password) =>

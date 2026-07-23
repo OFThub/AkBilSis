@@ -16,6 +16,12 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* `hidden` özniteliği tarayıcının display:none kuralıyla çalışır; aşağıdaki
+   .auth-form gibi display tanımlayan her yazar kuralı onu ezer ve öğe gizli
+   sayılmasına rağmen görünür kalır. Bu kural gizlemenin daima kazanmasını
+   sağlar — sitedeki tüm hidden kullanımları buna dayanır. */
+[hidden] { display: none !important; }
+
 body {
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
   background: var(--surface);
@@ -420,6 +426,57 @@ a:focus-visible {
 .field input:focus-visible { outline: 2px solid var(--blue-series); outline-offset: 1px; }
 
 .field small { font-size: 0.78rem; color: var(--ink-3); }
+
+/* Kart tipi seçimi — radyo düğmeleri gizlenip kutular tıklanabilir yapılır.
+   Girdi display:none ile değil, görsel olarak gizlenir: klavye odağı ve ekran
+   okuyucu erişimi korunsun diye. */
+.card-type { border: none; }
+
+.card-type legend {
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+
+.card-type-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.card-type-option { cursor: pointer; }
+
+.card-type-option input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.card-type-box {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--surface);
+}
+
+.card-type-box strong { display: block; font-size: 0.95rem; color: var(--ink); }
+
+.card-type-box small { display: block; font-size: 0.75rem; color: var(--ink-3); margin-top: 2px; }
+
+.card-type-option input:checked + .card-type-box {
+  border-color: var(--blue-series);
+  background: #eaf0fa;
+}
+
+.card-type-option input:checked + .card-type-box strong { color: var(--navy-900); font-weight: 800; }
+
+.card-type-option input:focus-visible + .card-type-box {
+  outline: 2px solid var(--blue-series);
+  outline-offset: 2px;
+}
+
+.card-type > small { display: block; margin-top: 8px; font-size: 0.75rem; color: var(--ink-3); line-height: 1.45; }
 
 .btn-primary {
   font: inherit;

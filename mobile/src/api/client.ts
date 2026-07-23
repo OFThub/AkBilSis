@@ -9,6 +9,7 @@
 import { BACKEND_URL } from "../config/env";
 import {
   Card,
+  CardType,
   Favorite,
   Line,
   LineDetail,
@@ -140,10 +141,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   // ── Kimlik ──────────────────────────────────────────────────────────────
-  register: (full_name: string, email: string, password: string) =>
+  register: (
+    full_name: string,
+    email: string,
+    password: string,
+    card_type: CardType = "normal"
+  ) =>
     request<Passenger>("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ full_name, email, password }),
+      body: JSON.stringify({ full_name, email, password, card_type }),
     }),
 
   login: (email: string, password: string) =>

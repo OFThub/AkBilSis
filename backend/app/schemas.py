@@ -14,6 +14,10 @@ class RegisterRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     email: EmailStr
     password: str = Field(min_length=8, max_length=72)
+    #: Başvuruda beyan edilen kart tipi. Beyan doğrulanmaz; öğrencilik belgesi
+    #: kontrolü belediyede yapılır, gerekirse yönetici
+    #: PATCH /admin/cards/{id}/type ile düzeltir.
+    card_type: CardType = CardType.NORMAL
 
 
 class LoginRequest(BaseModel):
