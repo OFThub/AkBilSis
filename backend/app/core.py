@@ -98,7 +98,6 @@ def verify_password(raw: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(raw.encode()[:_BCRYPT_MAX_BYTES], hashed.encode())
     except ValueError:
-        # Bozuk/eski biçimli hash — hata fırlatmadan reddet
         return False
 
 

@@ -55,9 +55,6 @@ class Line(Base,UUIDMixin,TimestampMixin,SoftDeleteMixin):
     code: Mapped[str] = mapped_column(String(16), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    # Saat başına beklenen yoğunluk (24 eleman, 0-100). lines.json'dan seed edilir;
-    # yolcuya "hattın yoğun saatleri" bunun üzerinden gösterilir. Admin analitiği
-    # ise gerçek Trip kayıtlarından hesaplanır — ikisi karıştırılmaz.
     hourly_profile: Mapped[list[int]] = mapped_column(JSON, default=list, nullable=False)
 
     line_stops: Mapped[list["LineStop"]] = relationship(
@@ -116,10 +113,6 @@ class Trip(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     alighted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[TripStatus] = mapped_column(Enum(TripStatus, native_enum=False), default=TripStatus.OPEN, index=True, nullable=False)
     card_type_snapshot: Mapped[CardType] = mapped_column(Enum(CardType, native_enum=False), nullable=False)
-    # Son durakta otomatik iniş: yolcu inmezse aracın son durağa varacağı an
-    # binişte tarifeden hesaplanıp damgalanır. Araç konumu duvar saatinden
-    # döngüsel türetildiği için "araç şu an son durakta mı" sorusu geçmiş turu
-    # ıskalar; damga ıskalamaz.
     auto_alight_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     auto_alight_stop_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("stops.id"))
     card: Mapped["Card"] = relationship(back_populates="trips")

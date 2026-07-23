@@ -72,9 +72,6 @@ def register(payload: RegisterRequest, db: DbSession):
 @auth_router.post("/login", response_model=TokenPair)
 def login(payload: LoginRequest, db: DbSession, response: Response):
     access, refresh = AuthService(db).login(payload.email, payload.password)
-    # Web sitesi token'ı JS'te tutmaz: httpOnly çerez hem XSS'e karşı korur hem
-    # de /admin sayfasının sunucuda doğrulanabilmesini sağlar. Mobil bu çerezi
-    # yok sayar, Authorization başlığıyla devam eder.
     response.set_cookie(
         key=ACCESS_COOKIE,
         value=access,
@@ -180,10 +177,6 @@ def active_trip(passenger: CurrentPassenger, db: DbSession):
 
 @validation_router.post("", response_model=ValidateResponse)
 def validate(payload: ValidateRequest, passenger: CurrentPassenger, db: DbSession):
-    """Kart bas: açık yolculuk yoksa biniş, varsa iniş.
-
-    Durak gönderilmez — aracın o anki konumundan sunucu belirler.
-    """
     return ValidationService(db).validate(passenger, payload.bus_id)
 
 
@@ -242,11 +235,6 @@ def admin_stats(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
 @admin_router.patch("/cards/{card_id}/type", response_model=CardRead)
 def admin_set_card_type(card_id: uuid.UUID, payload: CardTypeUpdate, db: DbSession):
     return CardService(db).set_type(card_id, payload.card_type)
-
-
-# ── Analitik ────────────────────────────────────────────────────────────────
-# Hepsi mobilden gelen gerçek Trip kayıtlarından hesaplanır. `load_level`
-# sunucuda üretilir; web yalnızca boyar.
 
 
 @admin_router.get("/analytics/overview", response_model=AnalyticsOverview)

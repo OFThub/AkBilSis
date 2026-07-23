@@ -56,7 +56,6 @@ from app.simulation import (
     terminus_moment,
 )
 
-#: Kart tipinin arayüzde görünen adı — web ve mobil aynı etiketi kullanır
 CARD_TYPE_LABELS = {
     CardType.NORMAL: "Tam",
     CardType.STUDENT: "Öğrenci",
@@ -69,13 +68,7 @@ def _now() -> datetime:
 
 
 def _phase_group(buses, direction: Direction) -> list[Bus]:
-    """Aynı yöndeki araçlar, plakaya göre sabit sırada.
 
-    Faz hesabı bu sıraya dayanır; `live_buses` ile `ValidationService._locate`
-    aynı listeyi ürettiği için "listede gördüğüm araç" ile "kart bastığım araç"
-    aynı konumda olur. Pasif araçlar da listede kalır — çıkarılırsa kalanların
-    fazı kayar ve açık yolculukların otomatik iniş damgası tutmaz.
-    """
     return sorted((b for b in buses if b.direction == direction), key=lambda b: b.plate)
 
 
@@ -92,8 +85,7 @@ class AuthService:
         card_type: CardType = CardType.NORMAL,
     ) -> Passenger:
         email = email.strip().lower()
-        # Kontrol, DB'deki unique index ile aynı kümeye bakmalı: index
-        # soft-delete'i görmez, bu yüzden sorgu da görmemeli.
+
         if self.passengers.email_taken(email):
             raise ConflictError("Bu e-posta zaten kayıtlı")
 
@@ -104,8 +96,7 @@ class AuthService:
         )
         self.passengers.add(passenger)
 
-        # Kart tipi başvuruda beyan edilir; belge kontrolü belediyede yapılır ve
-        # gerekirse yönetici PATCH /admin/cards/{id}/type ile düzeltir.
+
         card = Card(
             passenger_id=passenger.id,
             medium=CardMedium.MOBILE,
@@ -132,8 +123,7 @@ class AuthService:
         passenger = self.passengers.get(uuid.UUID(payload["sub"]))
         if passenger is None:
             raise AuthError("Kullanıcı bulunamadı")
-        # Her tazelemede sürüm artar: kullanılan refresh token bir daha geçmez,
-        # çalınan token da ilk meşru tazelemede geçersizleşir.
+
         if payload.get("ver") != passenger.token_version:
             raise AuthError("Oturum geçersiz kılınmış")
 
@@ -220,8 +210,6 @@ class CardService:
         return card
 
     def set_type(self, card_id: uuid.UUID, card_type: CardType) -> Card:
-        """Tam/öğrenci statüsü. Süregelen yolculuklar etkilenmez: tip yolculuk
-        açılırken `card_type_snapshot` olarak damgalanır."""
         card = self.cards.get_or_fail(card_id)
         card.card_type = card_type
         self.db.commit()
@@ -253,29 +241,18 @@ class TransitService:
 
     @staticmethod
     def _attach_peaks(line: Line) -> None:
-        """Tepe saatleri şemaya taşınabilsin diye ORM nesnesine iliştirir.
 
-        Kalıcı bir alan değil: profil değiştiğinde tepe saat de değişsin diye
-        her okumada yeniden hesaplanır.
-        """
         line.peak_hours = peak_hours(line.hourly_profile or [])
 
     def search_stops(self, term: str):
         return self.stops.search(term)
 
     def _schedule(self, line_id: uuid.UUID, direction: Direction) -> tuple[list, list[int]]:
-        """Hattın sıralı durakları ve varış tarifesi."""
         entries = list(self.line_stops.list_ordered(line_id, direction))
         gaps = [e.minutes_from_previous or 0 for e in entries[1:]]
         return entries, stop_schedule(gaps)
 
     def live_buses(self, line_id: uuid.UUID) -> list[BusLive]:
-        """Hattın canlı araç konumları — tek doğruluk kaynağı simulation.py.
-
-        Faz, yön başına ayrı hesaplanır ve payda o yöndeki gerçek araç sayısıdır;
-        sabit bir sayıya bağlı değildir, bu yüzden hatta araç eklemek diğerlerini
-        üst üste bindirmez.
-        """
         self.lines.get_or_fail(line_id)
         all_buses = self.buses.list_by_line(line_id, only_active=False)
         if not all_buses:
@@ -380,12 +357,6 @@ class ValidationService:
         return active[0]
 
     def _locate(self, bus: Bus, now: datetime) -> tuple[Stop, Stop, float, int]:
-        """Aracın o an durduğu durak, son durak, son durağa kalan sim-dakika ve
-        durağın güzergâhtaki sıra numarası.
-
-        Durak istemciden gelmez: "yalnızca durakta binilir/inilir" kuralı
-        burada, sunucuda zorlanır — istemci konumu taklit edemez.
-        """
         entries = list(self.line_stops.list_ordered(bus.line_id, bus.direction))
         if not entries:
             raise ConflictError("Hattın güzergâhı tanımlı değil")
@@ -440,9 +411,6 @@ class ValidationService:
         return trip
 
     def validate(self, passenger: Passenger, bus_id: uuid.UUID) -> ValidateResponse:
-        # Vakti gelmiş otomatik inişler önce kapanmalı; yoksa arkaplan döngüsü
-        # gecikince tamamlanmış bir yolculuk "açık" görünür ve terk edilmiş
-        # olarak damgalanır.
         TripService(self.db).close_due()
 
         bus = self.buses.get_or_fail(bus_id)
@@ -462,7 +430,6 @@ class ValidationService:
                 )
                 action = "boarded"
             elif open_trip.bus_id != bus.id:
-                # Başka araca binildi: önceki yolculuk kapanmadan bırakıldı sayılır
                 open_trip.status = TripStatus.ABANDONED
                 open_trip.alighted_at = now
                 trip = self._open_trip(
@@ -470,8 +437,6 @@ class ValidationService:
                 )
                 action = "boarded"
             elif open_trip.board_sequence == sequence:
-                # Ölçüt durak kimliği değil sıra numarası: araç tur atıp aynı
-                # durağa döndüğünde iniş yapılabilmeli.
                 raise ConflictError("Henüz durak değişmedi — sonraki durakta inebilirsiniz")
             else:
                 open_trip.alight_stop_id = stop.id
@@ -482,7 +447,6 @@ class ValidationService:
 
             self.db.commit()
         except IntegrityError:
-            # uq_open_trip_per_card: aynı karttan eşzamanlı iki biniş
             self.db.rollback()
             raise ConflictError("Bu kart için işlem zaten sürüyor, tekrar deneyin")
 
@@ -505,13 +469,11 @@ class TripService:
         self.cards = CardRepository(db)
 
     def history(self, passenger: Passenger, skip: int = 0, limit: int = 50):
-        # Arkaplan görevi gecikse bile yolcu tutarlı bir liste görsün
         self.close_due()
         card_ids = [c.id for c in self.cards.list_by_passenger(passenger.id)]
         return self.trips.list_by_cards(card_ids, skip, limit)
 
     def active(self, passenger: Passenger) -> Trip | None:
-        # Vakti gelmiş yolculuk "hâlâ araçtasınız" diye görünmesin
         self.close_due()
         for card in self.cards.list_by_passenger(passenger.id):
             trip = self.trips.get_open_by_card(card.id)
@@ -520,13 +482,6 @@ class TripService:
         return None
 
     def close_due(self) -> int:
-        """Son durakta otomatik iniş.
-
-        Yolcu inmeyi unutursa aracın son durağa vardığı anda yolculuk kapanır
-        ve geçmişe normal, tamamlanmış bir kayıt olarak yazılır. Aracın anlık
-        konumuna bakılmaz — binişte saklanan damgaya bakılır, çünkü konum duvar
-        saatinden döngüsel türetilir ve geçmiş bir turu ıskalayabilir.
-        """
         due = self.trips.list_due(_now())
         for trip in due:
             trip.alight_stop_id = trip.auto_alight_stop_id
@@ -614,7 +569,7 @@ class StatsService:
             ],
         )
 
-    # ── Yönetim analitiği ────────────────────────────────────────────────────
+
 
     def overview(self, days: int = 7) -> AnalyticsOverview:
         since = self._since(days)
@@ -638,13 +593,6 @@ class StatsService:
         )
 
     def line_analytics(self, days: int = 7) -> list[LineAnalytics]:
-        """Hat başına yoğunluk + sefer önerisi.
-
-        Karar ölçütü: **zirve saatte araç başına düşen günlük ortalama yolcu**.
-        Toplam yolculuk tek başına yanıltıcıdır — üç araçla taşınan 90 yolcu
-        rahat, tek araçla taşınan 40 yolcu sıkışıktır. Pencere gün sayısına
-        bölünmezse veri biriktikçe her hat "sefer artırılmalı" der.
-        """
         since = self._since(days)
         by_line_hour = self.trips.hourly_by_line(since=since)
         totals = self.trips.count_by_line(since=since)
@@ -691,7 +639,6 @@ class StatsService:
         return result
 
     def stop_analytics(self, days: int = 7) -> list[StopAnalytics]:
-        """Durak yoğunluğu — en yoğun durağa göre oranlanıp renklendirilir."""
         rows = self.trips.stop_usage(since=self._since(days))
         if not rows:
             return []

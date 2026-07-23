@@ -34,7 +34,6 @@ def _get_or_create_stop(db: Session, cache: dict[str, Stop], raw: dict) -> Stop:
 
 
 def _hourly(payload: dict) -> list[int]:
-    """24 elemanlı yoğunluk profili — eksik/bozuk veri sıfır dizisine düşer."""
     raw = payload.get("hourly") or []
     if len(raw) != 24:
         return [0] * 24
@@ -111,11 +110,6 @@ def _ensure_buses(db: Session, line: Line, count: int = BUSES_PER_LINE) -> None:
 
 
 def make_admin(db: Session, email: str, password: str) -> Passenger:
-    """Yönetici hesabı oluşturur ya da var olanı yönetici yapar.
-
-    Kayıt ucunda (AuthService.register) is_admin her zaman False'tur; ilk
-    yöneticiyi üretecek tek yol budur.
-    """
     try:
         email = validate_email(email.strip(), check_deliverability=False).normalized.lower()
     except EmailNotValidError as exc:
@@ -136,7 +130,6 @@ def make_admin(db: Session, email: str, password: str) -> Passenger:
         )
         db.add(passenger)
         db.flush()
-        # Kayıt akışıyla aynı: her yolcunun bir mobil kartı olur
         db.add(Card(passenger_id=passenger.id, medium=CardMedium.MOBILE))
         print(f"{email} yönetici olarak oluşturuldu.")
 

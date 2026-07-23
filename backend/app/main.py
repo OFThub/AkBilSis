@@ -18,21 +18,14 @@ from app.repositories import PassengerRepository
 from app.routes import routers
 from app.services import TripService
 
-#: Web sitesi backend ile aynı origin'den servis edilir — CORS gerekmez ve
-#: /admin sayfası sunucuda korunabilir.
 WEB_ROOT = Path(__file__).resolve().parent.parent.parent / "public"
 
-#: Son durakta otomatik iniş taraması sıklığı (saniye)
+
 AUTO_CLOSE_INTERVAL = 5
 
 
 async def _auto_close_loop() -> None:
-    """Son durağa varan yolculukları kapatan arkaplan görevi.
 
-    Yolcu inmeyi unutursa kayıt sonsuza dek açık kalmasın diye gerekir. Okuma
-    uçları (TripService.history/active) aynı temizliği ayrıca tetikler; bu
-    döngü kimse bakmasa da devrede olması içindir.
-    """
     while True:
         await asyncio.sleep(AUTO_CLOSE_INTERVAL)
         try:
@@ -42,7 +35,6 @@ async def _auto_close_loop() -> None:
             finally:
                 db.close()
         except Exception:
-            # Veritabanı geçici olarak erişilemezse döngü ölmemeli
             pass
 
 
@@ -68,9 +60,6 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    # Çerezli istek yalnızca aynı origin'deki web sitesinden gelir; mobil
-    # Authorization başlığı kullanır. allow_origins="*" ile credentials=True
-    # birlikte kullanılamaz — tarayıcı bu kombinasyonu reddeder.
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -98,12 +87,6 @@ def admin_page(
     db: Session = Depends(get_db),
     akbil_access: str | None = Cookie(default=None),
 ):
-    """Yönetim sayfası — HTML yalnızca yöneticiye döner.
-
-    Adres çubuğuna elle yazılsa da çerez doğrulanır: yönetici değilse sayfa hiç
-    üretilmez, giriş ekranına yönlendirilir. Veriler ayrıca /admin/* uçlarında
-    `get_current_admin` ile korunur, yani iki katmanlı kontrol vardır.
-    """
     fallback = RedirectResponse(url="/", status_code=303)
     if not akbil_access:
         return fallback
@@ -130,6 +113,4 @@ def admin_page(
 for router in routers:
     app.include_router(router, prefix=settings.api_prefix)
 
-# Statik dosyalar en sona monte edilir: "/" tüm yolları yakaladığı için önce
-# eklenirse /api/v1/* ve /admin gölgelenirdi.
 app.mount("/", StaticFiles(directory=WEB_ROOT, html=True), name="web")

@@ -314,16 +314,9 @@ class TripRepository(BaseRepository[Trip]):
         )
         return [(sid, name, total) for sid, name, total in self.db.execute(stmt).all()]
 
-    # ── Yönetim analitiği ────────────────────────────────────────────────────
-    # Aşağıdaki sorgular yalnızca /admin/analytics uçlarını besler. Hepsi
-    # gerçek Trip kayıtlarından hesaplanır; Line.hourly_profile'daki beklenen
-    # yoğunluk verisiyle karıştırılmaz. Saat, settings.analytics_timezone'a
-    # göre yerelleştirilir — ham UTC değil.
-
     def hourly_by_line(
         self, since: datetime | None = None, until: datetime | None = None
     ) -> list[tuple[uuid.UUID, int, int]]:
-        """(line_id, saat, biniş sayısı) — hattın kendi zirve saati buradan çıkar."""
         hour = self._local_hour()
         stmt = (
             self._in_range(
@@ -348,11 +341,6 @@ class TripRepository(BaseRepository[Trip]):
         since: datetime | None = None,
         until: datetime | None = None,
     ) -> list[tuple[uuid.UUID, str, int, int]]:
-        """(stop_id, ad, biniş, iniş) — durak yoğunluğu iki yönün toplamıdır.
-
-        Biniş ve iniş ayrı sütunlarda döner ki admin "burada çok biniliyor ama
-        hiç inilmiyor" gibi dengesizlikleri görebilsin.
-        """
         zero = cast(literal(0), Integer)
 
         boardings = self._in_range(
@@ -404,11 +392,6 @@ class TripRepository(BaseRepository[Trip]):
         since: datetime | None = None,
         until: datetime | None = None,
     ) -> list[tuple[str, str, int]]:
-        """En yoğun güzergâhlar: (biniş durağı, iniş durağı, sayı).
-
-        Yalnızca tamamlanmış yolculuklar sayılır — açık ya da terk edilmiş
-        kayıtta iniş durağı yoktur.
-        """
         board_stop = aliased(Stop)
         alight_stop = aliased(Stop)
         stmt = (
@@ -452,7 +435,6 @@ class TripRepository(BaseRepository[Trip]):
         return self.db.scalars(stmt).all()
 
     def list_due(self, now: datetime) -> Sequence[Trip]:
-        """Son durağa varma anı geçmiş, hâlâ açık yolculuklar."""
         stmt = self._base_query().where(
             Trip.status == TripStatus.OPEN,
             Trip.auto_alight_at.is_not(None),
