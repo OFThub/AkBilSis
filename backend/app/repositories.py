@@ -5,11 +5,11 @@ from typing import Generic, Sequence, TypeVar
 from sqlalchemy import Integer, cast, func, literal, select, union_all
 from sqlalchemy.orm import Session, aliased, selectinload
 
+from app.config import settings
 from app.core import Direction, NotFoundError, TripStatus
 from app.models import (
     Bus,
     Card,
-    Device,
     Favorite,
     Line,
     LineStop,
@@ -54,8 +54,7 @@ class BaseRepository(Generic[T]):
 
     def update(self, obj: T, **fields) -> T:
         for key, value in fields.items():
-            if value is not None:
-                setattr(obj, key, value)
+            setattr(obj, key, value)
         self.db.flush()
         return obj
 
@@ -70,6 +69,10 @@ class BaseRepository(Generic[T]):
 
 class PassengerRepository(BaseRepository[Passenger]):
     model = Passenger
+
+    def email_taken(self, email: str) -> bool:
+        stmt = select(Passenger.id).where(Passenger.email == email)
+        return self.db.scalars(stmt).first() is not None
 
     def get_by_email(self, email: str) -> Passenger | None:
         stmt = self._base_query().where(Passenger.email == email)
@@ -96,21 +99,17 @@ class CardRepository(BaseRepository[Card]):
         stmt = self._base_query().where(Card.nfc_uid == nfc_uid)
         return self.db.scalars(stmt).first()
 
+    def nfc_uid_taken(self, nfc_uid: str) -> bool:
+        stmt = select(Card.id).where(Card.nfc_uid == nfc_uid)
+        return self.db.scalars(stmt).first() is not None
+
     def list_by_passenger(self, passenger_id: uuid.UUID) -> Sequence[Card]:
-        stmt = self._base_query().where(Card.passenger_id == passenger_id)
-        return self.db.scalars(stmt).all()
-
-
-class DeviceRepository(BaseRepository[Device]):
-    model = Device
-
-    def get_by_api_key_hash(self, key_hash: str) -> Device | None:
         stmt = (
             self._base_query()
-            .where(Device.api_key_hash == key_hash, Device.is_active.is_(True))
-            .options(selectinload(Device.bus))
+            .where(Card.passenger_id == passenger_id)
+            .order_by(Card.created_at, Card.id)
         )
-        return self.db.scalars(stmt).first()
+        return self.db.scalars(stmt).all()
 
 
 class LineRepository(BaseRepository[Line]):
@@ -120,11 +119,15 @@ class LineRepository(BaseRepository[Line]):
         stmt = self._base_query().where(Line.code == code)
         return self.db.scalars(stmt).first()
 
-    def get_with_stops(self, line_id: uuid.UUID) -> Line | None:
+    def get_with_stops(self, line_id: uuid.UUID, direction: Direction) -> Line | None:
         stmt = (
             self._base_query()
             .where(Line.id == line_id)
-            .options(selectinload(Line.line_stops).selectinload(LineStop.stop))
+            .options(
+                selectinload(
+                    Line.line_stops.and_(LineStop.direction == direction)
+                ).selectinload(LineStop.stop)
+            )
         )
         return self.db.scalars(stmt).first()
 
@@ -194,7 +197,7 @@ class BusRepository(BaseRepository[Bus]):
         stmt = (
             self._base_query()
             .where(Bus.is_active.is_(True))
-            .options(selectinload(Bus.line), selectinload(Bus.current_stop))
+            .options(selectinload(Bus.line))
         )
         return self.db.scalars(stmt).all()
 
@@ -202,15 +205,34 @@ class BusRepository(BaseRepository[Bus]):
 class TripRepository(BaseRepository[Trip]):
     model = Trip
 
+    @staticmethod
+    def _live(stmt):
+        return stmt.where(Trip.is_deleted.is_(False))
+
+    @classmethod
+    def _in_range(cls, stmt, since: datetime | None, until: datetime | None):
+        stmt = cls._live(stmt)
+        if since is not None:
+            stmt = stmt.where(Trip.boarded_at >= since)
+        if until is not None:
+            stmt = stmt.where(Trip.boarded_at < until)
+        return stmt
+
+    @staticmethod
+    def _local_hour():
+        return func.extract(
+            "hour", func.timezone(settings.analytics_timezone, Trip.boarded_at)
+        )
+
     def get_open_by_card(self, card_id: uuid.UUID) -> Trip | None:
-        stmt = select(Trip).where(
+        stmt = self._base_query().where(
             Trip.card_id == card_id, Trip.status == TripStatus.OPEN
         )
         return self.db.scalars(stmt).first()
 
     def list_open_by_bus(self, bus_id: uuid.UUID) -> Sequence[Trip]:
         stmt = (
-            select(Trip)
+            self._base_query()
             .where(Trip.bus_id == bus_id, Trip.status == TripStatus.OPEN)
             .order_by(Trip.boarded_at)
             .options(
@@ -220,13 +242,16 @@ class TripRepository(BaseRepository[Trip]):
         )
         return self.db.scalars(stmt).all()
 
-    def list_by_card(
-        self, card_id: uuid.UUID, skip: int = 0, limit: int = 50
+    def list_by_cards(
+        self, card_ids: Sequence[uuid.UUID], skip: int = 0, limit: int = 50
     ) -> Sequence[Trip]:
+        """Yolcunun tüm kartlarının yolculukları, tek sorguda sayfalanmış."""
+        if not card_ids:
+            return []
         stmt = (
-            select(Trip)
-            .where(Trip.card_id == card_id)
-            .order_by(Trip.boarded_at.desc())
+            self._base_query()
+            .where(Trip.card_id.in_(card_ids))
+            .order_by(Trip.boarded_at.desc(), Trip.id.desc())
             .offset(skip)
             .limit(limit)
             .options(
@@ -237,38 +262,51 @@ class TripRepository(BaseRepository[Trip]):
         )
         return self.db.scalars(stmt).all()
 
-    def list_stale_open(self, cutoff: datetime) -> Sequence[Trip]:
-        stmt = select(Trip).where(
-            Trip.status == TripStatus.OPEN, Trip.boarded_at < cutoff
-        )
-        return self.db.scalars(stmt).all()
-
     def count_open_by_bus(self) -> dict[uuid.UUID, int]:
         stmt = (
-            select(Trip.bus_id, func.count(Trip.id))
+            self._live(select(Trip.bus_id, func.count(Trip.id)))
             .where(Trip.status == TripStatus.OPEN)
             .group_by(Trip.bus_id)
         )
         return {bus_id: count for bus_id, count in self.db.execute(stmt).all()}
 
     def count_open_by_line(self, line_id: uuid.UUID) -> int:
-        stmt = select(func.count(Trip.id)).where(
+        stmt = self._live(select(func.count(Trip.id))).where(
             Trip.line_id == line_id, Trip.status == TripStatus.OPEN
         )
         return self.db.scalar(stmt) or 0
 
-    def count_by_status(self) -> dict[str, int]:
-        stmt = select(Trip.status, func.count(Trip.id)).group_by(Trip.status)
+    def count_by_status(
+        self, since: datetime | None = None, until: datetime | None = None
+    ) -> dict[str, int]:
+        stmt = self._in_range(
+            select(Trip.status, func.count(Trip.id)), since, until
+        ).group_by(Trip.status)
         return {status.value: count for status, count in self.db.execute(stmt).all()}
 
-    def hourly_boardings(self) -> list[tuple[int, int]]:
-        hour = func.extract("hour", Trip.boarded_at)
-        stmt = select(hour, func.count(Trip.id)).group_by(hour).order_by(hour)
+    def hourly_boardings(
+        self, since: datetime | None = None, until: datetime | None = None
+    ) -> list[tuple[int, int]]:
+        hour = self._local_hour()
+        stmt = (
+            self._in_range(select(hour, func.count(Trip.id)), since, until)
+            .group_by(hour)
+            .order_by(hour)
+        )
         return [(int(h), c) for h, c in self.db.execute(stmt).all()]
 
-    def top_board_stops(self, limit: int = 10) -> list[tuple[uuid.UUID, str, int]]:
+    def top_board_stops(
+        self,
+        limit: int = 10,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[tuple[uuid.UUID, str, int]]:
         stmt = (
-            select(Stop.id, Stop.name, func.count(Trip.id).label("total"))
+            self._in_range(
+                select(Stop.id, Stop.name, func.count(Trip.id).label("total")),
+                since,
+                until,
+            )
             .join(Stop, Stop.id == Trip.board_stop_id)
             .group_by(Stop.id, Stop.name)
             .order_by(func.count(Trip.id).desc())
@@ -279,23 +317,37 @@ class TripRepository(BaseRepository[Trip]):
     # ── Yönetim analitiği ────────────────────────────────────────────────────
     # Aşağıdaki sorgular yalnızca /admin/analytics uçlarını besler. Hepsi
     # gerçek Trip kayıtlarından hesaplanır; Line.hourly_profile'daki beklenen
-    # yoğunluk verisiyle karıştırılmaz.
+    # yoğunluk verisiyle karıştırılmaz. Saat, settings.analytics_timezone'a
+    # göre yerelleştirilir — ham UTC değil.
 
-    def hourly_by_line(self) -> list[tuple[uuid.UUID, int, int]]:
+    def hourly_by_line(
+        self, since: datetime | None = None, until: datetime | None = None
+    ) -> list[tuple[uuid.UUID, int, int]]:
         """(line_id, saat, biniş sayısı) — hattın kendi zirve saati buradan çıkar."""
-        hour = func.extract("hour", Trip.boarded_at)
+        hour = self._local_hour()
         stmt = (
-            select(Trip.line_id, hour, func.count(Trip.id))
+            self._in_range(
+                select(Trip.line_id, hour, func.count(Trip.id)), since, until
+            )
             .group_by(Trip.line_id, hour)
             .order_by(Trip.line_id, hour)
         )
         return [(lid, int(h), c) for lid, h, c in self.db.execute(stmt).all()]
 
-    def count_by_line(self) -> dict[uuid.UUID, int]:
-        stmt = select(Trip.line_id, func.count(Trip.id)).group_by(Trip.line_id)
+    def count_by_line(
+        self, since: datetime | None = None, until: datetime | None = None
+    ) -> dict[uuid.UUID, int]:
+        stmt = self._in_range(
+            select(Trip.line_id, func.count(Trip.id)), since, until
+        ).group_by(Trip.line_id)
         return {line_id: count for line_id, count in self.db.execute(stmt).all()}
 
-    def stop_usage(self, limit: int = 12) -> list[tuple[uuid.UUID, str, int, int]]:
+    def stop_usage(
+        self,
+        limit: int = 12,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[tuple[uuid.UUID, str, int, int]]:
         """(stop_id, ad, biniş, iniş) — durak yoğunluğu iki yönün toplamıdır.
 
         Biniş ve iniş ayrı sütunlarda döner ki admin "burada çok biniliyor ama
@@ -303,17 +355,25 @@ class TripRepository(BaseRepository[Trip]):
         """
         zero = cast(literal(0), Integer)
 
-        boardings = select(
-            Trip.board_stop_id.label("stop_id"),
-            func.count(Trip.id).label("boarding"),
-            zero.label("alighting"),
+        boardings = self._in_range(
+            select(
+                Trip.board_stop_id.label("stop_id"),
+                func.count(Trip.id).label("boarding"),
+                zero.label("alighting"),
+            ),
+            since,
+            until,
         ).group_by(Trip.board_stop_id)
 
         alightings = (
-            select(
-                Trip.alight_stop_id.label("stop_id"),
-                zero.label("boarding"),
-                func.count(Trip.id).label("alighting"),
+            self._in_range(
+                select(
+                    Trip.alight_stop_id.label("stop_id"),
+                    zero.label("boarding"),
+                    func.count(Trip.id).label("alighting"),
+                ),
+                since,
+                until,
             )
             .where(Trip.alight_stop_id.is_not(None))
             .group_by(Trip.alight_stop_id)
@@ -338,7 +398,12 @@ class TripRepository(BaseRepository[Trip]):
             for sid, name, board, alight in self.db.execute(stmt).all()
         ]
 
-    def top_pairs(self, limit: int = 10) -> list[tuple[str, str, int]]:
+    def top_pairs(
+        self,
+        limit: int = 10,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[tuple[str, str, int]]:
         """En yoğun güzergâhlar: (biniş durağı, iniş durağı, sayı).
 
         Yalnızca tamamlanmış yolculuklar sayılır — açık ya da terk edilmiş
@@ -347,7 +412,13 @@ class TripRepository(BaseRepository[Trip]):
         board_stop = aliased(Stop)
         alight_stop = aliased(Stop)
         stmt = (
-            select(board_stop.name, alight_stop.name, func.count(Trip.id).label("total"))
+            self._in_range(
+                select(
+                    board_stop.name, alight_stop.name, func.count(Trip.id).label("total")
+                ),
+                since,
+                until,
+            )
             .join(board_stop, board_stop.id == Trip.board_stop_id)
             .join(alight_stop, alight_stop.id == Trip.alight_stop_id)
             .where(Trip.status == TripStatus.COMPLETED)
@@ -357,15 +428,17 @@ class TripRepository(BaseRepository[Trip]):
         )
         return [(a, b, total) for a, b, total in self.db.execute(stmt).all()]
 
-    def count_by_card_type(self) -> dict[str, int]:
-        stmt = select(Trip.card_type_snapshot, func.count(Trip.id)).group_by(
-            Trip.card_type_snapshot
-        )
+    def count_by_card_type(
+        self, since: datetime | None = None, until: datetime | None = None
+    ) -> dict[str, int]:
+        stmt = self._in_range(
+            select(Trip.card_type_snapshot, func.count(Trip.id)), since, until
+        ).group_by(Trip.card_type_snapshot)
         return {card_type.value: count for card_type, count in self.db.execute(stmt).all()}
 
     def recent(self, limit: int = 20) -> Sequence[Trip]:
         stmt = (
-            select(Trip)
+            self._base_query()
             .order_by(Trip.boarded_at.desc())
             .limit(limit)
             .options(
@@ -380,7 +453,7 @@ class TripRepository(BaseRepository[Trip]):
 
     def list_due(self, now: datetime) -> Sequence[Trip]:
         """Son durağa varma anı geçmiş, hâlâ açık yolculuklar."""
-        stmt = select(Trip).where(
+        stmt = self._base_query().where(
             Trip.status == TripStatus.OPEN,
             Trip.auto_alight_at.is_not(None),
             Trip.auto_alight_at <= now,

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.core import CardMedium, CardType, Direction, TripStatus
 
@@ -13,11 +13,18 @@ class ORMModel(BaseModel):
 class RegisterRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     email: EmailStr
-    password: str = Field(min_length=8, max_length=72)
+    password: str = Field(min_length=8)
     #: Başvuruda beyan edilen kart tipi. Beyan doğrulanmaz; öğrencilik belgesi
     #: kontrolü belediyede yapılır, gerekirse yönetici
     #: PATCH /admin/cards/{id}/type ile düzeltir.
     card_type: CardType = CardType.NORMAL
+
+    @field_validator("password")
+    @classmethod
+    def _bcrypt_limit(cls, value: str) -> str:
+        if len(value.encode()) > 72:
+            raise ValueError("Parola en fazla 72 bayt olabilir")
+        return value
 
 
 class LoginRequest(BaseModel):
@@ -74,11 +81,6 @@ class CardTypeUpdate(BaseModel):
     card_type: CardType
 
 
-class CardTokenResponse(BaseModel):
-    card_token: str
-    expires_in: int
-
-
 class StopRead(ORMModel):
     id: uuid.UUID
     name: str
@@ -113,8 +115,6 @@ class BusRead(ORMModel):
     plate: str
     line_id: uuid.UUID
     direction: Direction
-    current_stop_id: uuid.UUID | None
-    location_updated_at: datetime | None
     is_active: bool
 
 
@@ -122,10 +122,6 @@ class BusCreate(BaseModel):
     plate: str = Field(min_length=5, max_length=16)
     line_id: uuid.UUID
     direction: Direction = Direction.FORWARD
-
-
-class BusLocationUpdate(BaseModel):
-    stop_id: uuid.UUID
 
 
 class TripRead(ORMModel):
@@ -197,30 +193,10 @@ class ValidateResponse(BaseModel):
     occurred_at: datetime
 
 
-class DeviceCreate(BaseModel):
-    name: str = Field(min_length=2, max_length=100)
-    bus_id: uuid.UUID | None = None
-
-class DeviceBusAssign(BaseModel):
-    bus_id: uuid.UUID
-
-class DeviceRead(ORMModel):
-    id: uuid.UUID
-    name: str
-    bus_id: uuid.UUID | None
-    is_active: bool
-    created_at: datetime
-
-
-class DeviceCreated(DeviceRead):
-    api_key: str
-
-
 class BusOccupancy(BaseModel):
     bus_id: uuid.UUID
     plate: str
     line_code: str
-    current_stop_name: str | None
     passenger_count: int
 
 

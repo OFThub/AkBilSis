@@ -18,7 +18,8 @@ from datetime import datetime, timedelta
 
 from app.config import settings
 
-#: Hat başına sefer hâlindeki araç sayısı — seed bu kadar Bus satırı üretir
+#: Seed'in hat başına ürettiği araç sayısı. Faz hesabı buna bakmaz; oradaki
+#: payda hattın o yöndeki gerçek araç sayısıdır (bkz. bus_position).
 BUSES_PER_LINE = 3
 #: Son durak molası (sim-dakika) — araç sefere hazırlanır, biniş kapalıdır
 LAYOVER_MIN = 6
@@ -65,11 +66,14 @@ def sim_minutes(now: datetime) -> float:
     return (now.timestamp() / 60.0) * settings.sim_speed
 
 
-def bus_position(bus_index: int, arrival: list[int], now: datetime) -> LivePosition:
+def bus_position(
+    bus_index: int, bus_count: int, arrival: list[int], now: datetime
+) -> LivePosition:
     """`bus_index` numaralı aracın o anki konumu.
 
-    Araçlar sefer döngüsüne eşit aralıklarla dağıtılır: aynı hattaki üç araç
-    birbirini takip eder, hepsi aynı anda aynı durakta olmaz.
+    Araçlar sefer döngüsüne eşit aralıklarla dağıtılır: aynı yöndeki araçlar
+    birbirini takip eder, hepsi aynı anda aynı durakta olmaz. Payda `bus_count`
+    olduğu için hatta araç eklemek/çıkarmak çakışmaya yol açmaz.
     """
     last_index = len(arrival) - 1
     if last_index < 1:
@@ -80,7 +84,7 @@ def bus_position(bus_index: int, arrival: list[int], now: datetime) -> LivePosit
     route_min = arrival[last_index]
     cycle_min = route_min + LAYOVER_MIN
 
-    offset = (bus_index * cycle_min) / BUSES_PER_LINE
+    offset = (bus_index * cycle_min) / max(1, bus_count)
     pos = (sim_minutes(now) - offset) % cycle_min
 
     # Son durak molası: sefer bitti, başa dönmeyi bekliyor

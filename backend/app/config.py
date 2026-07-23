@@ -23,17 +23,10 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
 
-    card_token_secret: str
-    card_token_expire_seconds: int = 60
+    analytics_timezone: str = "Europe/Istanbul"
 
-    device_api_key_header: str = "X-Device-Key"
 
-    trip_auto_close_minutes: int = 180
-
-    # Otobüs simülasyonu: konum duvar saatinden deterministik hesaplanır,
-    # çarpan gerçek saniyeyi sim-dakikaya çevirir (10 → 30 sn ≈ 5 dk yol)
     sim_speed: float = 10.0
-    # Bir otobüsün "dolu" sayıldığı yolcu sayısı — yoğunluk renk kodunun paydası
     bus_capacity: int = 40
 
     cors_origins: list[str] = ["*"]

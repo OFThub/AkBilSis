@@ -2,6 +2,7 @@ import argparse
 import json
 from pathlib import Path
 
+from email_validator import EmailNotValidError, validate_email
 from sqlalchemy.orm import Session
 
 from app.core import CardMedium, Direction, hash_password
@@ -37,7 +38,10 @@ def _hourly(payload: dict) -> list[int]:
     raw = payload.get("hourly") or []
     if len(raw) != 24:
         return [0] * 24
-    return [int(v) for v in raw]
+    try:
+        return [int(v) for v in raw]
+    except (TypeError, ValueError):
+        return [0] * 24
 
 
 def _get_or_create_line(db: Session, payload: dict) -> Line:
@@ -90,14 +94,17 @@ def _sync_line_stops(db: Session, line: Line, stops: list[Stop], minutes: list[i
 
 
 def _ensure_buses(db: Session, line: Line, count: int = BUSES_PER_LINE) -> None:
-    existing = db.query(Bus).filter(Bus.line_id == line.id).count()
+    existing = (
+        db.query(Bus)
+        .filter(Bus.line_id == line.id, Bus.direction == Direction.FORWARD)
+        .count()
+    )
     for index in range(existing, count):
         db.add(
             Bus(
                 plate=f"34 {line.code}{index + 1:02d}",
                 line_id=line.id,
                 direction=Direction.FORWARD,
-                current_stop_id=line.line_stops[0].stop_id if line.line_stops else None,
             )
         )
     db.flush()
@@ -109,7 +116,11 @@ def make_admin(db: Session, email: str, password: str) -> Passenger:
     Kayıt ucunda (AuthService.register) is_admin her zaman False'tur; ilk
     yöneticiyi üretecek tek yol budur.
     """
-    email = email.strip().lower()
+    try:
+        email = validate_email(email.strip(), check_deliverability=False).normalized.lower()
+    except EmailNotValidError as exc:
+        raise SystemExit(f"Geçersiz e-posta: {exc}")
+
     passenger = db.query(Passenger).filter(Passenger.email == email).first()
 
     if passenger:

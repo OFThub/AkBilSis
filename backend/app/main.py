@@ -113,8 +113,15 @@ def admin_page(
     except AuthError:
         return fallback
 
-    passenger = PassengerRepository(db).get(uuid.UUID(payload["sub"]))
+    try:
+        passenger_id = uuid.UUID(payload["sub"])
+    except (KeyError, ValueError):
+        return fallback
+
+    passenger = PassengerRepository(db).get(passenger_id)
     if passenger is None or not passenger.is_admin:
+        return fallback
+    if payload.get("ver") != passenger.token_version:
         return fallback
 
     return FileResponse(WEB_ROOT / "admin.html")

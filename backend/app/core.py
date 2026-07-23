@@ -1,5 +1,4 @@
 import enum
-import hashlib
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -61,7 +60,6 @@ class Direction(str, enum.Enum):
 class TokenType(str, enum.Enum):
     ACCESS = "access"
     REFRESH = "refresh"
-    CARD = "card"
 
 
 class AppError(Exception):
@@ -88,8 +86,7 @@ class ForbiddenError(AppError):
     status_code = 403
 
 
-#: bcrypt parolanın yalnızca ilk 72 baytını kullanır; kayıt şeması
-#: (RegisterRequest) bu sınırı zaten zorluyor, burada güvenlik ağı olarak durur.
+
 _BCRYPT_MAX_BYTES = 72
 
 
@@ -127,17 +124,22 @@ def _decode(token: str, secret: str, expected_type: TokenType) -> dict:
     return payload
 
 
-def create_access_token(user_id: uuid.UUID, is_admin: bool) -> str:
+def create_access_token(user_id: uuid.UUID, is_admin: bool, version: int) -> str:
     return _encode(
-        {"sub": str(user_id), "admin": is_admin, "type": TokenType.ACCESS.value},
+        {
+            "sub": str(user_id),
+            "admin": is_admin,
+            "ver": version,
+            "type": TokenType.ACCESS.value,
+        },
         settings.secret_key,
         timedelta(minutes=settings.access_token_expire_minutes),
     )
 
 
-def create_refresh_token(user_id: uuid.UUID) -> str:
+def create_refresh_token(user_id: uuid.UUID, version: int) -> str:
     return _encode(
-        {"sub": str(user_id), "type": TokenType.REFRESH.value},
+        {"sub": str(user_id), "ver": version, "type": TokenType.REFRESH.value},
         settings.secret_key,
         timedelta(days=settings.refresh_token_expire_days),
     )
@@ -149,23 +151,3 @@ def decode_access_token(token: str) -> dict:
 
 def decode_refresh_token(token: str) -> dict:
     return _decode(token, settings.secret_key, TokenType.REFRESH)
-
-
-def create_card_token(card_id: uuid.UUID) -> str:
-    return _encode(
-        {"sub": str(card_id), "type": TokenType.CARD.value},
-        settings.card_token_secret,
-        timedelta(seconds=settings.card_token_expire_seconds),
-    )
-
-
-def decode_card_token(token: str) -> dict:
-    return _decode(token, settings.card_token_secret, TokenType.CARD)
-
-
-def generate_api_key() -> str:
-    return secrets.token_urlsafe(32)
-
-
-def hash_api_key(raw: str) -> str:
-    return hashlib.sha256(raw.encode()).hexdigest()

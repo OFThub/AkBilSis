@@ -3,25 +3,20 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.config import settings
+from app.core import Direction
 from app.deps import ACCESS_COOKIE, CurrentPassenger, DbSession, get_current_admin
 from app.schemas import (
     AnalyticsOverview,
     BusCreate,
     BusLive,
-    BusLocationUpdate,
     BusOccupancy,
     BusOccupancyDetail,
     BusRead,
     CardCreate,
     CardLinkRequest,
     CardRead,
-    CardTokenResponse,
     CardTypeShare,
     CardTypeUpdate,
-    DeviceBusAssign,
-    DeviceCreate,
-    DeviceCreated,
-    DeviceRead,
     FavoriteCreate,
     FavoriteRead,
     LineAnalytics,
@@ -47,7 +42,6 @@ from app.schemas import (
 from app.services import (
     AuthService,
     CardService,
-    DeviceService,
     FavoriteService,
     PassengerService,
     StatsService,
@@ -86,6 +80,7 @@ def login(payload: LoginRequest, db: DbSession, response: Response):
         value=access,
         httponly=True,
         samesite="lax",
+        secure=not settings.debug,
         max_age=settings.access_token_expire_minutes * 60,
         path="/",
     )
@@ -123,20 +118,18 @@ def link_card(payload: CardLinkRequest, passenger: CurrentPassenger, db: DbSessi
     return CardService(db).link(passenger, payload.nfc_uid)
 
 
-@card_router.post("/{card_id}/token", response_model=CardTokenResponse)
-def issue_card_token(card_id: uuid.UUID, passenger: CurrentPassenger, db: DbSession):
-    token, expires_in = CardService(db).issue_token(passenger, card_id)
-    return CardTokenResponse(card_token=token, expires_in=expires_in)
-
-
 @transit_router.get("/lines", response_model=list[LineRead])
 def list_lines(db: DbSession, skip: int = 0, limit: int = Query(default=100, le=200)):
     return TransitService(db).list_lines(skip, limit)
 
 
 @transit_router.get("/lines/{line_id}", response_model=LineDetail)
-def get_line(line_id: uuid.UUID, db: DbSession):
-    return TransitService(db).get_line(line_id)
+def get_line(
+    line_id: uuid.UUID,
+    db: DbSession,
+    direction: Direction = Direction.FORWARD,
+):
+    return TransitService(db).get_line(line_id, direction)
 
 
 @transit_router.get("/lines/{line_id}/buses", response_model=list[BusLive])
@@ -231,39 +224,6 @@ def admin_create_bus(payload: BusCreate, db: DbSession):
     return TransitService(db).create_bus(payload.plate, payload.line_id, payload.direction)
 
 
-@admin_router.patch("/buses/{bus_id}/location", response_model=BusRead)
-def admin_update_bus_location(bus_id: uuid.UUID, payload: BusLocationUpdate, db: DbSession):
-    return TransitService(db).update_location(bus_id, payload.stop_id)
-
-
-@admin_router.post("/devices", response_model=DeviceCreated, status_code=status.HTTP_201_CREATED)
-def admin_create_device(payload: DeviceCreate, db: DbSession):
-    device, raw_key = DeviceService(db).create(payload.name, payload.bus_id)
-    return DeviceCreated(
-        id=device.id,
-        name=device.name,
-        bus_id=device.bus_id,
-        is_active=device.is_active,
-        created_at=device.created_at,
-        api_key=raw_key,
-    )
-
-
-@admin_router.get("/devices", response_model=list[DeviceRead])
-def admin_list_devices(db: DbSession):
-    return DeviceService(db).list()
-
-
-@admin_router.post("/devices/{device_id}/revoke", response_model=DeviceRead)
-def admin_revoke_device(device_id: uuid.UUID, db: DbSession):
-    return DeviceService(db).revoke(device_id)
-
-
-@admin_router.patch("/devices/{device_id}/bus", response_model=DeviceRead)
-def admin_assign_device_bus(device_id: uuid.UUID, payload: DeviceBusAssign, db: DbSession):
-    return DeviceService(db).assign_bus(device_id, payload.bus_id)
-
-
 @admin_router.get("/occupancy", response_model=list[BusOccupancy])
 def admin_occupancy(db: DbSession):
     return StatsService(db).occupancy()
@@ -275,8 +235,8 @@ def admin_occupancy_detail(bus_id: uuid.UUID, db: DbSession):
 
 
 @admin_router.get("/stats", response_model=StatsSummary)
-def admin_stats(db: DbSession):
-    return StatsService(db).summary()
+def admin_stats(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
+    return StatsService(db).summary(days)
 
 
 @admin_router.patch("/cards/{card_id}/type", response_model=CardRead)
@@ -290,30 +250,30 @@ def admin_set_card_type(card_id: uuid.UUID, payload: CardTypeUpdate, db: DbSessi
 
 
 @admin_router.get("/analytics/overview", response_model=AnalyticsOverview)
-def admin_analytics_overview(db: DbSession):
-    return StatsService(db).overview()
+def admin_analytics_overview(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
+    return StatsService(db).overview(days)
 
 
 @admin_router.get("/analytics/lines", response_model=list[LineAnalytics])
-def admin_analytics_lines(db: DbSession):
+def admin_analytics_lines(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
     """Hat başına yoğunluk ve sefer artır/azalt önerisi."""
-    return StatsService(db).line_analytics()
+    return StatsService(db).line_analytics(days)
 
 
 @admin_router.get("/analytics/stops", response_model=list[StopAnalytics])
-def admin_analytics_stops(db: DbSession):
-    return StatsService(db).stop_analytics()
+def admin_analytics_stops(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
+    return StatsService(db).stop_analytics(days)
 
 
 @admin_router.get("/analytics/pairs", response_model=list[StopPair])
-def admin_analytics_pairs(db: DbSession):
+def admin_analytics_pairs(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
     """En yoğun güzergâhlar — hangi duraklar arası en çok yolculuk yapılıyor."""
-    return StatsService(db).stop_pairs()
+    return StatsService(db).stop_pairs(days)
 
 
 @admin_router.get("/analytics/card-types", response_model=list[CardTypeShare])
-def admin_analytics_card_types(db: DbSession):
-    return StatsService(db).card_type_shares()
+def admin_analytics_card_types(db: DbSession, days: int = Query(default=7, ge=1, le=90)):
+    return StatsService(db).card_type_shares(days)
 
 
 @admin_router.get("/trips", response_model=list[RecentTrip])
@@ -324,11 +284,6 @@ def admin_recent_trips(db: DbSession, limit: int = Query(default=20, le=100)):
 @admin_router.post("/trips/{trip_id}/close", response_model=TripRead)
 def admin_close_trip(trip_id: uuid.UUID, db: DbSession, stop_id: uuid.UUID | None = None):
     return TripService(db).close_manually(trip_id, stop_id)
-
-
-@admin_router.post("/trips/close-stale")
-def admin_close_stale(db: DbSession):
-    return {"closed": TripService(db).close_stale()}
 
 
 routers = [
