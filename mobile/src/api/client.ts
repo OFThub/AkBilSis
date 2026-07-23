@@ -10,6 +10,7 @@ import { BACKEND_URL } from "../config/env";
 import {
   Card,
   CardType,
+  Direction,
   Favorite,
   Line,
   LineDetail,
@@ -165,7 +166,8 @@ export const api = {
 
   // ── Hat ve araçlar ──────────────────────────────────────────────────────
   lines: () => request<Line[]>("/transit/lines"),
-  lineDetail: (lineId: string) => request<LineDetail>(`/transit/lines/${lineId}`),
+  lineDetail: (lineId: string, direction: Direction = "forward") =>
+    request<LineDetail>(`/transit/lines/${lineId}?direction=${direction}`),
   liveBuses: (lineId: string) => request<LiveBus[]>(`/transit/lines/${lineId}/buses`),
 
   // ── Favoriler ───────────────────────────────────────────────────────────

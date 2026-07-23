@@ -49,7 +49,7 @@ from app.schemas import (
     ValidateResponse,
 )
 from app.simulation import (
-    bus_position,
+    round_trip_position,
     load_level,
     peak_hours,
     stop_schedule,
@@ -252,6 +252,15 @@ class TransitService:
         gaps = [e.minutes_from_previous or 0 for e in entries[1:]]
         return entries, stop_schedule(gaps)
 
+    def _round_trip(self, line_id: uuid.UUID) -> tuple[dict, dict]:
+        entries_by_direction = {}
+        schedules = {}
+        for direction in Direction:
+            entries, arrival = self._schedule(line_id, direction)
+            entries_by_direction[direction] = entries
+            schedules[direction] = arrival
+        return entries_by_direction, schedules
+
     def live_buses(self, line_id: uuid.UUID) -> list[BusLive]:
         self.lines.get_or_fail(line_id)
         all_buses = self.buses.list_by_line(line_id, only_active=False)
@@ -260,20 +269,21 @@ class TransitService:
 
         occupancy = self.trips.count_open_by_bus()
         now = _now()
+        entries_by_direction, schedules = self._round_trip(line_id)
         result: list[BusLive] = []
 
-        for direction in Direction:
-            group = _phase_group(all_buses, direction)
+        for start in Direction:
+            group = _phase_group(all_buses, start)
             if not group:
-                continue
-            entries, arrival = self._schedule(line_id, direction)
-            if not entries:
                 continue
 
             for index, bus in enumerate(group):
                 if not bus.is_active:
                     continue
-                pos = bus_position(index, len(group), arrival, now)
+                pos = round_trip_position(index, len(group), schedules, now, start)
+                entries = entries_by_direction[pos.direction]
+                if not entries:
+                    continue
                 result.append(
                     BusLive(
                         id=bus.id,
@@ -281,6 +291,7 @@ class TransitService:
                         line_id=bus.line_id,
                         at_stop=pos.at_stop,
                         layover=pos.layover,
+                        direction=pos.direction,
                         current_stop=entries[pos.from_index].stop,
                         next_stop=entries[pos.to_index].stop,
                         minutes_to_next=pos.minutes_to_next,
@@ -357,17 +368,24 @@ class ValidationService:
         return active[0]
 
     def _locate(self, bus: Bus, now: datetime) -> tuple[Stop, Stop, float, int]:
-        entries = list(self.line_stops.list_ordered(bus.line_id, bus.direction))
-        if not entries:
+        entries_by_direction = {}
+        schedules = {}
+        for direction in Direction:
+            legs = list(self.line_stops.list_ordered(bus.line_id, direction))
+            entries_by_direction[direction] = legs
+            gaps = [e.minutes_from_previous or 0 for e in legs[1:]]
+            schedules[direction] = stop_schedule(gaps)
+
+        if not entries_by_direction[bus.direction]:
             raise ConflictError("Hattın güzergâhı tanımlı değil")
 
-        gaps = [e.minutes_from_previous or 0 for e in entries[1:]]
         group = _phase_group(
             self.buses.list_by_line(bus.line_id, only_active=False), bus.direction
         )
         index = next((i for i, b in enumerate(group) if b.id == bus.id), 0)
 
-        pos = bus_position(index, len(group), stop_schedule(gaps), now)
+        pos = round_trip_position(index, len(group), schedules, now, bus.direction)
+        entries = entries_by_direction[pos.direction]
 
         if pos.layover:
             raise ConflictError("Bu araç son durakta sefer bekliyor — yoldaki bir araç seçin")

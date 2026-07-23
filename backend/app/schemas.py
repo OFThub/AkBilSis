@@ -161,6 +161,7 @@ class BusLive(BaseModel):
     line_id: uuid.UUID
     at_stop: bool
     layover: bool
+    direction: Direction
     current_stop: StopRead | None
     next_stop: StopRead | None
     minutes_to_next: int

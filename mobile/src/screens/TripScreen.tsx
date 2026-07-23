@@ -13,7 +13,7 @@ import {
   SectionCard,
   SectionTitle,
 } from "../components/UI";
-import { Line, LineDetail, LiveBus, Trip } from "../types";
+import { Direction, Line, LineDetail, LiveBus, Trip } from "../types";
 
 /** Araç konumları sunucuda hesaplandığı için düzenli aralıkla tazelenir */
 const POLL_MS = 2000;
@@ -35,6 +35,8 @@ export default function TripScreen() {
   const [lines, setLines] = useState<Line[]>([]);
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [lineDetail, setLineDetail] = useState<LineDetail | null>(null);
+  // Şemada gösterilen yön — araçlar gidiş ve dönüşü tek döngüde yapar
+  const [direction, setDirection] = useState<Direction>("forward");
   const [buses, setBuses] = useState<LiveBus[]>([]);
   const [trip, setTrip] = useState<Trip | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
@@ -74,7 +76,7 @@ export default function TripScreen() {
     if (!watchedLineId) return;
     let cancelled = false;
     api
-      .lineDetail(watchedLineId)
+      .lineDetail(watchedLineId, direction)
       .then((detail) => {
         if (!cancelled) setLineDetail(detail);
       })
@@ -82,7 +84,7 @@ export default function TripScreen() {
     return () => {
       cancelled = true;
     };
-  }, [watchedLineId]);
+  }, [watchedLineId, direction]);
 
   // Canlı araç konumları — sunucudan düzenli aralıkla
   useEffect(() => {
@@ -248,11 +250,26 @@ export default function TripScreen() {
 
         {lineDetail && (
           <SectionCard>
-            <SectionTitle>
-              {lineDetail.code} {t("lineDiagram")}
-            </SectionTitle>
+            <View style={styles.diagramHeader}>
+              <SectionTitle>
+                {lineDetail.code} {t("lineDiagram")} ·{" "}
+                {direction === "forward" ? t("directionForward") : t("directionBackward")}
+              </SectionTitle>
+              <Pressable
+                onPress={() =>
+                  setDirection((prev) => (prev === "forward" ? "backward" : "forward"))
+                }
+                accessibilityRole="button"
+                accessibilityLabel={t("toggleDirection")}
+                hitSlop={8}
+                style={styles.directionButton}
+              >
+                <Text style={styles.directionButtonLabel}>⇅ {t("toggleDirection")}</Text>
+              </Pressable>
+            </View>
             <StopRail
               detail={lineDetail}
+              direction={direction}
               buses={trip ? (tripBus ? [tripBus] : []) : buses}
               boardingStopId={trip?.board_stop.id}
               styles={styles}
@@ -318,28 +335,33 @@ function BusCard({
 /** Hat şeması: duraklar + araçların canlı konum işaretleri */
 function StopRail({
   detail,
+  direction,
   buses,
   boardingStopId,
   styles,
 }: {
   detail: LineDetail;
+  direction: Direction;
   buses: LiveBus[];
   boardingStopId?: string;
   styles: ReturnType<typeof makeStyles>;
 }) {
   const t = useT();
-  // Sunucu her iki yönü de döndürür; şemada gidiş yönü gösterilir
   const stops = detail.line_stops
-    .filter((entry) => entry.direction === "forward")
+    .filter((entry) => entry.direction === direction)
     .sort((a, b) => a.sequence - b.sequence);
+
+  // Duraklar iki yönde ortaktır: ters yöndeki araç filtrelenmezse bu şemada
+  // aynadaki yanlış konumda görünürdü
+  const shown = buses.filter((bus) => bus.direction === direction);
 
   return (
     <View>
       {stops.map((entry, index) => {
-        const atStop = buses.filter(
+        const atStop = shown.filter(
           (bus) => bus.at_stop && bus.current_stop?.id === entry.stop.id
         );
-        const onSegment = buses.filter(
+        const onSegment = shown.filter(
           (bus) => !bus.at_stop && !bus.layover && bus.current_stop?.id === entry.stop.id
         );
         const isBoarding = boardingStopId === entry.stop.id;
@@ -472,6 +494,21 @@ function makeStyles(palette: Palette) {
       backgroundColor: palette.chipBlueBg,
     },
     occText: { fontSize: 11.5, fontWeight: "800", color: palette.blue },
+    diagramHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+    },
+    directionButton: {
+      borderWidth: 1,
+      borderColor: palette.blue,
+      borderRadius: radius.control,
+      backgroundColor: palette.chipBlueBg,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    directionButtonLabel: { fontSize: 12.5, fontWeight: "700", color: palette.blue },
     stopRow: { flexDirection: "row", alignItems: "center", paddingRight: 10 },
     stopRail: { width: 34, alignItems: "center", alignSelf: "stretch" },
     railSegment: { flex: 1, width: 2, backgroundColor: palette.line },

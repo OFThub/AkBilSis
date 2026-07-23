@@ -42,6 +42,8 @@ export interface LineStop {
   stop: Stop;
 }
 
+export type Direction = "forward" | "backward";
+
 export interface Line {
   id: string;
   code: string;
@@ -65,6 +67,8 @@ export interface LiveBus {
   id: string;
   plate: string;
   line_id: string;
+  /** Aracın o anki yönü — gidiş bacağında forward, dönüşte backward */
+  direction: Direction;
   /** Durakta bekliyor — biniş ve iniş yalnızca bu sırada yapılabilir */
   at_stop: boolean;
   /** Son durakta sefer bekliyor — yolcu alınmaz */

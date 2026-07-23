@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from app.config import settings
+from app.core import Direction
 
 
 BUSES_PER_LINE = 3
@@ -21,6 +22,7 @@ class LivePosition:
     minutes_to_next: int
     minutes_to_terminus: float
     layover: bool
+    direction: Direction
 
 
 def stop_schedule(minutes_between: list[int]) -> list[int]:
@@ -34,30 +36,12 @@ def sim_minutes(now: datetime) -> float:
     return (now.timestamp() / 60.0) * settings.sim_speed
 
 
-def bus_position(
-    bus_index: int, bus_count: int, arrival: list[int], now: datetime
-) -> LivePosition:
+def opposite(direction: Direction) -> Direction:
+    return Direction.BACKWARD if direction is Direction.FORWARD else Direction.FORWARD
 
+
+def _on_route(pos: float, arrival: list[int], direction: Direction) -> LivePosition:
     last_index = len(arrival) - 1
-    if last_index < 1:
-        return LivePosition(0, 0, True, 1, 0.0, False)
-
-    route_min = arrival[last_index]
-    cycle_min = route_min + LAYOVER_MIN
-
-    offset = (bus_index * cycle_min) / max(1, bus_count)
-    pos = (sim_minutes(now) - offset) % cycle_min
-
-    if pos >= route_min:
-        return LivePosition(
-            from_index=last_index,
-            to_index=last_index,
-            at_stop=False,
-            minutes_to_next=max(1, math.ceil(cycle_min - pos)),
-            minutes_to_terminus=0.0,
-            layover=True,
-        )
-
 
     from_index = 0
     while from_index < last_index and arrival[from_index + 1] <= pos:
@@ -73,9 +57,60 @@ def bus_position(
         to_index=to_index,
         at_stop=at_stop,
         minutes_to_next=max(1, math.ceil(next_event - pos)),
-        minutes_to_terminus=route_min - pos,
+        minutes_to_terminus=arrival[last_index] - pos,
         layover=False,
+        direction=direction,
     )
+
+
+def _at_layover(arrival: list[int], remaining: float, direction: Direction) -> LivePosition:
+    last_index = len(arrival) - 1
+    return LivePosition(
+        from_index=last_index,
+        to_index=last_index,
+        at_stop=False,
+        minutes_to_next=max(1, math.ceil(remaining)),
+        minutes_to_terminus=0.0,
+        layover=True,
+        direction=direction,
+    )
+
+
+def round_trip_position(
+    bus_index: int,
+    bus_count: int,
+    schedules: dict[Direction, list[int]],
+    now: datetime,
+    start: Direction = Direction.FORWARD,
+) -> LivePosition:
+    """Gidiş ve dönüşü tek döngüde birleştirir.
+
+    Araç son durağa varınca molaya çekilir, sonra ters yönün güzergâhından geri
+    döner ve döngü baştan başlar. Yön saatten türetilir, saklanmaz: sunucu
+    yeniden başlasa da aynı anda aynı yön çıkar.
+
+    `start` aracın sefere hangi yönden başladığıdır (`Bus.direction`); o anki
+    yön dönen `LivePosition.direction` alanındadır.
+    """
+    legs = [(d, schedules.get(d) or []) for d in (start, opposite(start))]
+    legs = [(d, arrival) for d, arrival in legs if len(arrival) > 1]
+    if not legs:
+        return LivePosition(0, 0, True, 1, 0.0, False, start)
+
+    cycle_min = sum(arrival[-1] for _, arrival in legs) + LAYOVER_MIN * len(legs)
+
+    offset = (bus_index * cycle_min) / max(1, bus_count)
+    pos = (sim_minutes(now) - offset) % cycle_min
+
+    for direction, arrival in legs:
+        if pos < arrival[-1]:
+            return _on_route(pos, arrival, direction)
+        pos -= arrival[-1]
+        if pos < LAYOVER_MIN:
+            return _at_layover(arrival, LAYOVER_MIN - pos, direction)
+        pos -= LAYOVER_MIN
+
+    return _on_route(0.0, legs[0][1], legs[0][0])
 
 
 def terminus_moment(now: datetime, minutes_to_terminus: float) -> datetime:
